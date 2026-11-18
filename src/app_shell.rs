@@ -1,26 +1,23 @@
-mod frame;
+mod file_opener;
 
-use self::frame::Frame;
-use crate::theme::NoteTheme;
+use self::file_opener::FileOpener;
+use crate::screen::editor::EditorScreen;
+use crate::theme::CodeTheme;
 use aimer::animation::curves;
 use aimer::style::AnimatedTheme;
 use aimer::*;
 use std::time::Duration;
 
-/// Picks the light or dark theme from the system, and fades between them.
+/// Provides the theme to the tree, and opens the files the app is asked to open.
 #[derive(Clone, StatelessWidget)]
 pub struct AppShell;
 
 impl StatelessWidget for AppShell {
-    fn build(&self, ctx: &BuildContext) -> impl Widget {
-        let theme = match ctx.watch_platform_brightness() {
-            Brightness::Light => NoteTheme::light(),
-            Brightness::Dark => NoteTheme::dark(),
-        };
+    fn build(&self, _ctx: &BuildContext) -> impl Widget {
         AnimatedTheme::new()
-            .data(theme)
+            .data(CodeTheme::dark())
             .duration(Duration::from_millis(300))
             .curve(curves::EASE_IN_OUT)
-            .child(Frame)
+            .child(FileOpener::new(EditorScreen))
     }
 }

@@ -24,5 +24,29 @@
     <string>10.11</string>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <!-- aimer:documents:start: generated from [[documents]] in Aimer.toml, edits between the markers are overwritten -->
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Markdown document</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>CFBundleTypeExtensions</key>
+            <array>
+                <string>md</string>
+                <string>markdown</string>
+                <string>txt</string>
+            </array>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>net.daringfireball.markdown</string>
+                <string>public.plain-text</string>
+            </array>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+        </dict>
+    </array>
+    <!-- aimer:documents:end -->
 </dict>
 </plist>

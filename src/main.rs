@@ -1,14 +1,19 @@
 mod app_shell;
 mod components;
-mod images;
+mod doc_comments;
+mod document;
+mod file_icons;
+mod fonts;
+mod git;
 mod markdown;
-mod models;
 mod screen;
-mod store;
+mod syntax;
 mod theme;
+mod tree;
+mod workspace;
 
 use crate::app_shell::AppShell;
-use crate::store::NoteStore;
+use crate::workspace::Workspace;
 use aimer::native::macos_windowing::MacosWindowing;
 use aimer::quiver::window_attr::WindowAttr;
 use aimer::*;
@@ -16,16 +21,18 @@ use aimer::*;
 // this is the entry point of the app
 #[aimer::main]
 fn main() {
+    // The code font is registered before the app starts, as the framework asks.
+    fonts::register();
     AimerApp::new()
         .window(
             WindowAttr::new()
-                .title("Annote")
+                .title("Refractor")
                 .inner_size(1100, 720)
-                .min_inner_size(760, 480)
-                .remember("annote-main"),
+                .min_inner_size(640, 400)
+                .remember("refractor-main"),
         )
         .setup(|| {
-            // The title bar is drawn over the page, so the sidebar's material runs to the top.
+            // The title bar is drawn over the page, so the editor's own title strip runs to the top.
             MacosWindowing::new()
                 .titlebar_transparent(true)
                 .title_hidden(true)
@@ -35,6 +42,10 @@ fn main() {
                 .accepts_first_mouse(true)
                 .install();
         })
-        .child(Provider::new().create(NoteStore::default).child(AppShell))
+        .child(
+            Provider::new()
+                .create(Workspace::initial)
+                .child(AppShell),
+        )
         .run()
 }

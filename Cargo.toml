@@ -1,8 +1,8 @@
 [package]
-name = "annote"
+name = "refractor"
 version = "0.1.0"
 edition = "2024"
-description = "A simple note app that build for testing aimer ability...."
+description = "A code editor built with the Aimer framework"
 
 [lib]
 path = "src/main.rs"
@@ -11,14 +11,20 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 [dependencies]
 # aimer = {git="https://github.com/Cottons29/aimer.git", branch = "main"}
 
-aimer = { path = "../aimer", features = ["provider", "svg", "icons", "native", "markdown", "image-picker"] }
+aimer = { path = "../aimer", features = ["provider", "svg", "icons", "native", "markdown"] }
 
-# The live markdown preview parses the whole note on every keystroke and the text layout walks
-# its graphemes. Both are dependencies, so a debug build would run them unoptimised and the
-# editor would feel slow in a way the app does not. Optimising only these keeps the rest of
-# the build debuggable.
-[profile.dev.package.markdown]
+# Tree-sitter, for the syntax of the code on screen. It is already in the framework's graph
+# (the markdown renderer uses it for code blocks); the app reads its parser directly because it
+# parses incrementally, which the framework's highlighter does not.
+arborium = { version = "2.18.0", default-features = false, features = ["lang-rust"] }
+
+# Dev builds of these crates are optimized, which the aimer workspace's own profile does not
+# pass on to an app: the Unicode tables the text layout searches, and the byte-scan kernels, which
+# run a vector at a time only when they are optimized.
+# (This is compiler optimization, which AGENTS.md asks not to lean on; it is here at the app
+# owner's request, not as a substitute for making the code itself fast.)
+[profile.dev.package.unicode-segmentation]
 opt-level = 3
 
-[profile.dev.package.unicode-segmentation]
+[profile.dev.package.aimer_simd]
 opt-level = 3

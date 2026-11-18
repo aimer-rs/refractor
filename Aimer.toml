@@ -1,6 +1,15 @@
 [package]
-name = "Annote"
+name = "Refractor"
 version = "0.1.0"
-description = "A simple note app written using Aimer"
+description = "A code editor built with the Aimer framework"
 author = "Cottons29"
-group = "rs.aimer.annote"
+group = "rs.aimer.refractor"
+
+# The kinds of file the app opens: what makes the system offer it a file dropped
+# on its icon or chosen in "Open With". macOS reads the extensions, iOS only the
+# `utis`, Android the `mime_types` or the extensions.
+[[documents]]
+name = "Source file"
+extensions = ["rs", "toml", "md", "markdown", "txt"]
+utis = ["public.source-code", "public.plain-text"]
+mime_types = ["text/x-rust", "text/plain"]

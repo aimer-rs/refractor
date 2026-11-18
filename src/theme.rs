@@ -1,63 +1,63 @@
 use aimer::{Color, Theme};
 
-/// Whether the window blurs what is behind it, which the sidebar then shows.
-/// macOS only, as in the Jaime showcase.
-pub const NATIVE_BACKDROP: bool = cfg!(target_os = "macos");
-
-/// Colours of the app. Derives `Theme` so `AnimatedTheme` can fade between the
-/// light and dark variants.
+/// The colors of the editor. Derives `Theme` so `AnimatedTheme` can provide it to the tree.
+///
+/// There is one theme, a dark one: the syntax colors in [`crate::syntax::SyntaxPalette`] are chosen
+/// for these backgrounds.
 #[derive(Clone, Copy, Debug, PartialEq, Theme)]
-pub struct NoteTheme {
-    /// Sidebar background.
+pub struct CodeTheme {
+    /// The strips along the top and the bottom: the tabs and the status bar.
+    pub bar: Color,
+    /// The file tree.
     pub sidebar: Color,
-    /// Note list background.
-    pub list: Color,
-    /// Editor background.
+    /// The code, and what is behind it.
     pub editor: Color,
+    /// Lines between things.
+    pub divider: Color,
+    /// Text that is not code: file names and the status.
     pub text: Color,
     pub muted: Color,
-    pub divider: Color,
-    /// Accent used for the selected row and the folder icons.
+    /// Changed files and what is selected: the color of a name that git says is modified.
     pub accent: Color,
-    pub on_accent: Color,
-    /// Background of a hovered row or button.
+    /// The line that marks the tab being edited.
+    pub marker: Color,
+    /// The background of the open file in the tree.
+    pub selected: Color,
+    /// The background of what the pointer is over.
     pub hover: Color,
-    pub field: Color,
+    /// The color of code that has no syntax color.
+    pub code: Color,
+    pub line_number: Color,
+    pub line_number_active: Color,
+    /// The band behind the line the caret is on.
+    pub current_line: Color,
+    pub selection: Color,
+    /// A file git sees as deleted.
+    pub deleted: Color,
+    /// Something went wrong.
+    pub warning: Color,
 }
 
-impl NoteTheme {
-    /// The sidebar's fill: a tint over the window's blur where there is one.
-    pub fn sidebar_fill(&self) -> Color {
-        if NATIVE_BACKDROP { self.sidebar.with_alpha(0.66) } else { self.sidebar }
-    }
-
+impl CodeTheme {
     pub fn dark() -> Self {
         Self {
-            sidebar: Color::Rgb(33, 38, 46),
-            list: Color::Rgb(29, 30, 33),
-            editor: Color::Rgb(30, 30, 30),
-            text: Color::Rgb(235, 235, 240),
-            muted: Color::Rgb(142, 146, 154),
-            divider: Color::Rgb(50, 52, 56),
-            accent: Color::Rgb(164, 137, 58),
-            on_accent: Color::Rgb(255, 255, 255),
-            hover: Color::Rgb(255, 255, 255).with_alpha(0.07),
-            field: Color::Rgb(255, 255, 255).with_alpha(0.08),
-        }
-    }
-
-    pub fn light() -> Self {
-        Self {
-            sidebar: Color::Rgb(240, 238, 232),
-            list: Color::Rgb(250, 250, 248),
-            editor: Color::Rgb(255, 255, 255),
-            text: Color::Rgb(30, 30, 32),
-            muted: Color::Rgb(120, 122, 128),
-            divider: Color::Rgb(222, 220, 214),
-            accent: Color::Rgb(214, 170, 52),
-            on_accent: Color::Rgb(30, 30, 32),
-            hover: Color::Rgb(0, 0, 0).with_alpha(0.05),
-            field: Color::Rgb(0, 0, 0).with_alpha(0.06),
+            bar: Color::Rgb(11, 11, 16),
+            sidebar: Color::Rgb(12, 12, 17),
+            editor: Color::Rgb(10, 10, 15),
+            divider: Color::Rgb(34, 33, 45),
+            text: Color::Rgb(232, 230, 240),
+            muted: Color::Rgb(138, 136, 154),
+            accent: Color::Rgb(84, 205, 236),
+            marker: Color::Rgb(255, 92, 150),
+            selected: Color::Rgb(60, 34, 72),
+            hover: Color::Rgb(255, 255, 255).with_alpha(0.06),
+            code: Color::Rgb(236, 235, 242),
+            line_number: Color::Rgb(98, 96, 118),
+            line_number_active: Color::Rgb(228, 226, 238),
+            current_line: Color::Rgb(250, 24, 156).with_alpha(0.025),
+            selection: Color::Rgb(118, 72, 170).with_alpha(0.5),
+            deleted: Color::Rgb(238, 108, 108),
+            warning: Color::Rgb(240, 124, 112),
         }
     }
 }

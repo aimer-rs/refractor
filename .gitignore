@@ -27,3 +27,5 @@ builds/windows/bundle
 builds/dist
 
 # add another ignore here -_-
+agents/
+target/

@@ -5,13 +5,13 @@ plugins {
 }
 
 android {
-    namespace = "rs.aimer.annote"
+    namespace = "rs.aimer.refractor"
     // The AndroidX libraries below require compiling against API 37; `targetSdk`
     // stays at 36 so the app does not silently opt in to newer runtime behavior.
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "rs.aimer.annote"
+        applicationId = "rs.aimer.refractor"
         minSdk = 24
         targetSdk = 36
         versionCode = 1

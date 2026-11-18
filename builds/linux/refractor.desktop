@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Refractor
+Comment=Refractor
+Exec=refractor
+Icon=refractor
+Terminal=false
+Type=Application
+Categories=Utility;

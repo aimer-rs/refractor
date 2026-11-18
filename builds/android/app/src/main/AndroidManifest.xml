@@ -18,7 +18,7 @@
             android:exported="true"
             android:configChanges="orientation|keyboardHidden|screenSize|uiMode"
             android:windowSoftInputMode="stateHidden|adjustResize">
-            <meta-data android:name="android.app.lib_name" android:value="annote" />
+            <meta-data android:name="android.app.lib_name" android:value="refractor" />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
