@@ -34,6 +34,7 @@ impl StatelessWidget for StatusBar {
                 .map(|branch| (branch, space.git_dirty()))
         });
         let message = ctx.select::<Workspace, Option<String>>(|space| space.message.clone());
+        let server = ctx.select::<Workspace, Option<crate::lsp::Summary>>(|space| space.lsp_summary());
         let small = fonts::ui()
             .font_size(12)
             .color(theme.muted);
@@ -45,6 +46,21 @@ impl StatelessWidget for StatusBar {
             left.push(
                 Text::new(if dirty { format!("{name}*") } else { name })
                     .text_style(small)
+                    .boxed(),
+            );
+        }
+        if let Some((label, failed)) = server.and_then(|summary| {
+            let failed = matches!(summary.status, Some(crate::lsp::Status::Failed(_)));
+            summary.label().map(|label| (label, failed))
+        }) {
+            left.push(
+                Text::new(label)
+                    .text_style(
+                        fonts::ui()
+                            .font_size(12)
+                            .color(if failed { theme.warning } else { theme.muted })
+                            .text_overflow(TextOverflow::Ellipsis),
+                    )
                     .boxed(),
             );
         }

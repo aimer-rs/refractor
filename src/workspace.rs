@@ -7,8 +7,10 @@ use std::rc::Rc;
 
 use aimer::{ProviderHandle, Venus};
 
-use crate::document::Document;
+use crate::completion::LspSource;
+use crate::document::{Document, Language};
 use crate::git::{self, Change};
+use crate::lsp::{Lsp, Place, Problem, Summary};
 use crate::tree;
 
 /// The state of the editor, shared by the file tree, the tabs and the editor. It is cloned cheaply:
@@ -34,6 +36,10 @@ pub struct Workspace {
     /// until the first answer, or for a folder that is not in a repository.
     status: Rc<git::Status>,
     next_id: u64,
+    /// The language server, told of the Rust files that are open.
+    lsp: Lsp,
+    /// Whether the panel of problems is open under the editor.
+    pub problems_open: bool,
     /// Counts the times the documents' changes were reported, so what watches the workspace is told
     /// when a document becomes changed or unchanged, which the list of documents does not show.
     pub changes: u64,
@@ -43,6 +49,7 @@ impl Workspace {
     /// A workspace on the folder `root`, with nothing open.
     pub fn new(root: PathBuf) -> Self {
         let branch = git::branch_of(&root);
+        let lsp = Lsp::new(root.clone());
         let mut space = Self {
             root,
             branch,
@@ -54,6 +61,8 @@ impl Workspace {
             rows: Rc::new(Vec::new()),
             status: Rc::default(),
             next_id: 1,
+            lsp,
+            problems_open: false,
             changes: 0,
         };
         space.refresh();
@@ -157,6 +166,7 @@ impl Workspace {
             self.active = Some(document.id);
             return Ok(());
         }
+        let told = Rc::clone(&notify);
         let document = match Document::open(self.next_id, path, notify) {
             Ok(document) => document,
             Err(error) => {
@@ -166,7 +176,31 @@ impl Workspace {
         };
         self.next_id += 1;
         self.active = Some(document.id);
+        if document.language == Language::Rust {
+            // The server is run and told later, and not inside this update: `told` is how what shows it
+            // is drawn again when it has something to say.
+            self.lsp.open(path, &document.controller, told);
+            // And the items it offers to complete a word are asked of it.
+            document.set_completions(LspSource::new(self.lsp.clone(), path.to_path_buf()));
+        }
         self.documents.push(document);
+        Ok(())
+    }
+
+    /// The language server of the workspace, for what asks it something of a file that is open.
+    pub fn lsp(&self) -> Lsp {
+        self.lsp.clone()
+    }
+
+    /// Shows the place `place`, opening its file if it is not open: the caret at where the name starts, and the name in
+    /// the middle of the view with a mark on it, so that it is found at a glance. The positions are as the language server
+    /// says them: a line, and a character of it, and one past the end of the text is the end. A file that cannot be
+    /// opened is not gone to, and what is shown is as it was.
+    pub fn go_to_place(&mut self, place: &Place, notify: Rc<dyn Fn()>) -> io::Result<()> {
+        self.open(&place.path, notify)?;
+        let document = self.documents.iter().find(|document| document.path == place.path).expect("a file that was opened is open");
+        let snapshot = document.controller.snapshot();
+        document.show(self.lsp.byte_of(&snapshot, place.at)..self.lsp.byte_of(&snapshot, place.end));
         Ok(())
     }
 
@@ -214,7 +248,8 @@ impl Workspace {
         else {
             return;
         };
-        self.documents.remove(index);
+        let closed = self.documents.remove(index);
+        self.lsp.close(&closed.path);
         if self.active == Some(id) {
             self.active = self
                 .documents
@@ -233,6 +268,35 @@ impl Workspace {
         self.documents
             .iter()
             .find(|document| Some(document.id) == self.active)
+    }
+
+    /// What the language server says of the document being edited, if it is one it is told of.
+    pub fn lsp_summary(&self) -> Option<Summary> {
+        let document = self.active_document().filter(|document| document.language == Language::Rust)?;
+        let summary = self.lsp.summary(&document.path);
+        summary.status.is_some().then_some(summary)
+    }
+
+    /// Opens the panel of problems if it is shut, and shuts it if it is open.
+    pub fn toggle_problems(&mut self) {
+        self.problems_open = !self.problems_open;
+    }
+
+    /// Shuts the panel of problems.
+    pub fn close_problems(&mut self) {
+        self.problems_open = false;
+    }
+
+    /// The problems of the document being edited, worst first, while the panel that shows them is open. Finding
+    /// them copies the text a time, so while the panel is shut there are none to find.
+    pub fn problems(&self) -> Vec<Problem> {
+        if !self.problems_open {
+            return Vec::new();
+        }
+        match self.active_document().filter(|document| document.language == Language::Rust) {
+            Some(document) => self.lsp.problems(&document.path),
+            None => Vec::new(),
+        }
     }
 
     /// Whether the file `path` is open and has changes that are not saved.
@@ -329,6 +393,7 @@ pub fn choose_root(
 
 #[cfg(test)]
 mod tests {
+    use crate::lsp::Position;
     use std::cell::Cell;
 
     use super::*;
@@ -340,6 +405,86 @@ mod tests {
 
     fn workspace(scratch: &Scratch) -> Workspace {
         Workspace::new(scratch.0.clone())
+    }
+
+    #[test]
+    fn a_rust_file_asks_the_server_for_its_completions_and_other_files_have_no_source() {
+        let scratch = Scratch::new("completions");
+        let rust = scratch.file("a.rs", "fn a() {}\n");
+        let text = scratch.file("a.txt", "notes\n");
+        let mut space = workspace(&scratch);
+        space.open(&rust, notify()).unwrap();
+        space.open(&text, notify()).unwrap();
+        let by_name = |name: &str| space.documents.iter().find(|document| document.name == name).unwrap().completions().is_some();
+        assert!(by_name("a.rs"));
+        assert!(!by_name("a.txt"));
+    }
+
+    /// A place in `path` at `line` and `character`, `width` characters wide.
+    fn place(path: &Path, line: u32, character: u32, width: u32) -> Place {
+        Place { path: path.to_path_buf(), at: Position { line, character }, end: Position { line, character: character + width } }
+    }
+
+    #[test]
+    fn going_to_a_place_opens_the_file_and_puts_the_caret_at_the_byte_the_position_is() {
+        let scratch = Scratch::new("go-to-place");
+        let a = scratch.file("a.rs", "fn a() {}\n");
+        // The first line has an accent in it, which is two bytes and one character, and the server counts characters here.
+        let b = scratch.file("b.rs", "// caf\u{e9}\nfn target() {}\n");
+        let mut space = workspace(&scratch);
+        space.open(&a, notify()).unwrap();
+        space.go_to_place(&place(&b, 1, 3, 6), notify()).unwrap();
+        let active = space.active_document().expect("the file was opened and is the one shown");
+        assert_eq!(active.path, b);
+        // Line 1 begins after "// café\n", which is 9 bytes (the accent is two), and the name is 3 characters in.
+        assert_eq!(active.controller.value().selection().range(), 9 + 3..9 + 3);
+        // The text area is asked to show the name, which is `target`: from where the caret is to the end of it.
+        assert_eq!(active.controller.take_locate(), Some(9 + 3..9 + 9), "the whole name, and not only where it starts");
+        assert_eq!(space.documents.len(), 2);
+    }
+
+    #[test]
+    fn going_to_a_place_in_a_file_that_is_open_shows_it_and_does_not_open_it_again() {
+        let scratch = Scratch::new("go-to-open");
+        let a = scratch.file("a.rs", "one\ntwo\nthree\n");
+        let b = scratch.file("b.rs", "b");
+        let mut space = workspace(&scratch);
+        space.open(&a, notify()).unwrap();
+        space.open(&b, notify()).unwrap();
+        space.go_to_place(&place(&a, 2, 2, 2), notify()).unwrap();
+        assert_eq!(space.documents.len(), 2, "it was open");
+        let active = space.active_document().unwrap();
+        assert_eq!((active.path.clone(), active.controller.value().selection().range()), (a, 10..10));
+        // A position past the end of the text is the end of it, and one in a file that cannot be read is not gone to.
+        space.go_to_place(&place(&b, 50, 50, 4), notify()).unwrap();
+        assert_eq!(space.active_document().unwrap().controller.value().selection().range(), 1..1);
+        assert!(space.go_to_place(&place(&scratch.0.join("missing.rs"), 0, 0, 1), notify()).is_err());
+        assert_eq!(space.active_document().unwrap().path, b, "what is shown is as it was");
+    }
+
+    #[test]
+    fn the_panel_of_problems_is_shut_until_it_is_asked_for_and_is_opened_and_shut_by_asking() {
+        let scratch = Scratch::new("problems");
+        let a = scratch.file("a.rs", "fn a() {}\n");
+        let mut space = workspace(&scratch);
+        assert!(!space.problems_open, "a workspace begins with the panel shut");
+        space.open(&a, notify()).unwrap();
+        assert!(!space.problems_open, "opening a file does not open it");
+        space.toggle_problems();
+        assert!(space.problems_open);
+        space.toggle_problems();
+        assert!(!space.problems_open);
+        space.toggle_problems();
+        space.close_problems();
+        assert!(!space.problems_open);
+        space.close_problems();
+        assert!(!space.problems_open, "shut is shut");
+        // Closing the last tab leaves the panel as it was: it has nothing to show, and shows that.
+        space.toggle_problems();
+        let id = space.documents[0].id;
+        space.close(id);
+        assert!(space.problems_open);
+        assert!(space.problems().is_empty(), "no document, no problems");
     }
 
     #[test]

@@ -6,6 +6,7 @@
 //! of the file is made to parse it. The editor asks for the styles of the lines it is about to draw,
 //! and only the captures of those lines are looked up.
 
+mod cache;
 mod palette;
 
 use crate::doc_comments::{self, DocRenderer};
@@ -13,6 +14,8 @@ use crate::doc_comments::{self, DocRenderer};
 use std::cell::RefCell;
 use std::ops::Range;
 use std::rc::Rc;
+
+use self::cache::{HighlightCache, clip};
 
 use aimer::input::input::{
     HighlightContext, SpanStyle, StyledRange, TextEmbedder, TextHighlighter, TextSnapshot,
@@ -26,6 +29,10 @@ pub use self::palette::SyntaxPalette;
 /// The longest text that is highlighted, in bytes. A file past it is shown plain: parsing it whole
 /// the first time would be a pause the user would see, and it is not code anyone edits.
 const MAX_HIGHLIGHTED_BYTES: usize = 4 * 1024 * 1024;
+
+/// The most bytes of a text whose highlight is kept: a long file that is scrolled through is held a
+/// window at a time and not whole.
+const MAX_CACHED_BYTES: usize = 512 * 1024;
 
 /// The syntax of one document: its parse, kept current through the edits, and the styles to draw
 /// it with. Clones share the parse.
@@ -63,6 +70,8 @@ impl SyntaxHighlighter {
                 tree: None,
                 text: TextSnapshot::new(),
                 incremental_parses: 0,
+                cache: None,
+                queried_bytes: 0,
                 docs,
             })),
         }
@@ -95,20 +104,28 @@ impl SyntaxHighlighter {
             .bar_indent(text, line)
     }
 
-    /// The embedder that draws the rendered doc comments: each block as its markdown. `on_open` is
-    /// called with the first line of a block when it is clicked.
-    pub fn doc_embedder(&self, on_open: Rc<dyn Fn(usize)>) -> TextEmbedder {
+    /// The embedder that draws the rendered doc comments: each block as its markdown.
+    pub fn doc_embedder(&self) -> TextEmbedder {
         let engine = Rc::clone(&self.engine);
-        TextEmbedder::windowed(move |text, range, _context| engine.borrow().docs.embeds(text, range, &on_open))
+        TextEmbedder::windowed(move |text, range, _context| engine.borrow().docs.embeds(text, range))
     }
 
-    /// Shows as written the rendered doc comment that holds line `line`, if there is one: what typing
-    /// into a rendered block does. Returns whether one was opened.
-    pub fn open_doc_block_at(&self, text: &TextSnapshot, line: usize) -> bool {
+    /// Whether an edit that removes the bytes `removed` of `text` (inserts at its start, when it is
+    /// empty) would change a rendered doc comment, which cannot be edited while it is rendered.
+    pub fn protects(&self, text: &TextSnapshot, removed: Range<usize>) -> bool {
         self.engine
-            .borrow_mut()
+            .borrow()
             .docs
-            .open_at(text, line)
+            .protects(text, removed)
+    }
+
+    /// Whether Backspace (`backwards`) or Delete with the selection `selection` would change a
+    /// rendered doc comment; see [`DocRenderer::refuses_deletion`].
+    pub fn refuses_deletion(&self, text: &TextSnapshot, selection: Range<usize>, backwards: bool) -> bool {
+        self.engine
+            .borrow()
+            .docs
+            .refuses_deletion(text, selection, backwards)
     }
 
     /// Shows the doc comment that starts on `line` as written if it is rendered, and rendered if it is
@@ -129,12 +146,37 @@ impl SyntaxHighlighter {
             .symbol_at(text, at)
     }
 
+    /// The bytes of the name the byte `at` is in, when it is a name that something is defined as and used by: an
+    /// identifier, a type, a field. `None` for a comment, a string, a raw string, a keyword, a number, and for what is
+    /// beside the name. It is what the jump key shows as a link.
+    pub fn link_at(&self, text: &TextSnapshot, at: usize) -> Option<Range<usize>> {
+        self.engine
+            .borrow_mut()
+            .link_at(text, at)
+    }
+
     /// The styled ranges of `range` of `text`, with nothing focused.
     #[cfg(test)]
     pub fn ranges(&self, text: &TextSnapshot, range: Range<usize>) -> Vec<StyledRange> {
         self.engine
             .borrow_mut()
             .ranges(text, range)
+    }
+
+    /// The styled ranges of `range` as a query of it gives them, without the kept highlight.
+    #[cfg(test)]
+    pub fn uncached_ranges(&self, text: &TextSnapshot, range: Range<usize>) -> Vec<StyledRange> {
+        let mut engine = self.engine.borrow_mut();
+        engine.sync(text);
+        let range = range.start.min(text.len())..range.end.min(text.len());
+        let found = engine.query(text, range.clone());
+        clip(found, &range)
+    }
+
+    /// How many bytes of the text tree-sitter was asked about.
+    #[cfg(test)]
+    fn queried_bytes(&self) -> usize {
+        self.engine.borrow().queried_bytes
     }
 
     /// How many times the tree was made again from the one before it, and not from scratch.
@@ -155,6 +197,10 @@ struct Engine {
     /// The text `tree` is the parse of.
     text: TextSnapshot,
     incremental_parses: usize,
+    /// The highlight of the part of the text that was asked for, moved over the edits since.
+    cache: Option<HighlightCache>,
+    /// How many bytes of the text were asked tree-sitter about, which is what the cache is for.
+    queried_bytes: usize,
     /// The doc comments rendered as markdown, and which are shown as written.
     docs: DocRenderer,
 }
@@ -169,18 +215,79 @@ struct Capture {
 }
 
 impl Engine {
+    /// The styled ranges of `range`: the runs that have a byte in it, from what is kept of the highlight
+    /// and asked of tree-sitter only for the part that is not kept.
     fn ranges(&mut self, text: &TextSnapshot, range: Range<usize>) -> Vec<StyledRange> {
         if text.len() > MAX_HIGHLIGHTED_BYTES {
             self.tree = None;
+            self.cache = None;
             return Vec::new();
         }
         self.sync(text);
+        if self.tree.is_none() {
+            return Vec::new();
+        }
+        let range = range.start.min(text.len())..range.end.min(text.len());
+        if range.is_empty() {
+            return Vec::new();
+        }
+        self.cover(text, &range);
+        self.cache
+            .as_ref()
+            .map_or_else(Vec::new, |cache| cache.ranges_in(range))
+    }
+
+    /// Makes the kept highlight cover `range`: asks about the parts of it that it does not.
+    fn cover(&mut self, text: &TextSnapshot, range: &Range<usize>) {
+        let Some(mut cache) = self.cache.take() else {
+            self.cache = Some(self.fresh_cache(text, range));
+            return;
+        };
+        let covered = cache.covered();
+        if covered.start <= range.start && range.end <= covered.end {
+            self.cache = Some(cache);
+            return;
+        }
+        let touches = range.start <= covered.end && range.end >= covered.start;
+        let hull = covered.start.min(range.start)..covered.end.max(range.end);
+        if !touches || hull.len() > MAX_CACHED_BYTES {
+            // A window far from the last one, or too much to keep: a new start.
+            self.cache = Some(self.fresh_cache(text, range));
+            return;
+        }
+        if range.start < covered.start {
+            let part = range.start..covered.start;
+            let fresh = self.query_clipped(text, &part);
+            cache.extend(part, fresh);
+        }
+        if range.end > covered.end {
+            let part = covered.end..range.end;
+            let fresh = self.query_clipped(text, &part);
+            cache.extend(part, fresh);
+        }
+        self.cache = Some(cache);
+    }
+
+    fn fresh_cache(&mut self, text: &TextSnapshot, range: &Range<usize>) -> HighlightCache {
+        let fresh = self.query_clipped(text, range);
+        HighlightCache::new(range.clone(), fresh)
+    }
+
+    /// The runs of `region`, from tree-sitter, cut at its edges.
+    fn query_clipped(&mut self, text: &TextSnapshot, region: &Range<usize>) -> Vec<StyledRange> {
+        let found = self.query(text, region.clone());
+        clip(found, region)
+    }
+
+    /// The runs of the captures that have a byte in `region`, as tree-sitter gives them: the whole of a
+    /// run that reaches out of `region` is in them.
+    fn query(&mut self, text: &TextSnapshot, region: Range<usize>) -> Vec<StyledRange> {
         let Some(tree) = &self.tree else {
             return Vec::new();
         };
-        let range = range.start.min(text.len())..range.end.min(text.len());
+        self.queried_bytes += region.len();
         let mut cursor = QueryCursor::new();
-        cursor.set_byte_range(range.clone());
+        cursor.set_byte_range(region);
         let mut found = Vec::new();
         let mut captures = cursor.captures(&self.query, tree.root_node(), |node: Node| {
             text.chunks(node.byte_range())
@@ -201,6 +308,46 @@ impl Engine {
         flatten(found)
     }
 
+    /// Moves the kept highlight over the edit that made `text` of the text before it, `old` bytes of the
+    /// one replaced by `new` of this, and asks again about what the edit can have changed: the lines it
+    /// touched and the next to them, and the parts of the tree that changed shape, which an edit that
+    /// opens a string or a comment reaches far from itself.
+    fn keep_cache_over(&mut self, text: &TextSnapshot, old: Range<usize>, new: Range<usize>, changed: Vec<Range<usize>>) {
+        let Some(mut cache) = self.cache.take() else {
+            return;
+        };
+        cache.edited(old, new.len());
+        let covered = cache.covered();
+        if covered.is_empty() || text.len() == 0 {
+            return;
+        }
+        let last_line = text.line_count() - 1;
+        let mut regions: Vec<Range<usize>> = Vec::new();
+        for dirty in changed.into_iter().chain([new]) {
+            let start = dirty.start.min(text.len());
+            let end = dirty.end.min(text.len()).max(start);
+            let first = text.byte_to_line(start).saturating_sub(1);
+            let last = (text.byte_to_line(if end > start { end - 1 } else { start }) + 1).min(last_line);
+            let region = text.line_range(first).start.max(covered.start)..text.line_range(last).end.min(covered.end);
+            if region.start < region.end {
+                regions.push(region);
+            }
+        }
+        regions.sort_by_key(|region| region.start);
+        let mut merged: Vec<Range<usize>> = Vec::new();
+        for region in regions {
+            match merged.last_mut() {
+                Some(last) if region.start <= last.end => last.end = last.end.max(region.end),
+                _ => merged.push(region),
+            }
+        }
+        for region in merged {
+            let fresh = self.query_clipped(text, &region);
+            cache.replace(region, fresh);
+        }
+        self.cache = Some(cache);
+    }
+
     fn symbol_at(&mut self, text: &TextSnapshot, at: usize) -> Option<String> {
         if text.len() > MAX_HIGHLIGHTED_BYTES {
             return None;
@@ -219,6 +366,22 @@ impl Engine {
         }
     }
 
+    fn link_at(&mut self, text: &TextSnapshot, at: usize) -> Option<Range<usize>> {
+        if at >= text.len() || text.len() > MAX_HIGHLIGHTED_BYTES {
+            return None;
+        }
+        self.sync(text);
+        let node = self
+            .tree
+            .as_ref()?
+            .root_node()
+            .descendant_for_byte_range(at, at + 1)?;
+        // The leaf the byte is in, and only the kinds of leaf that name something. A string and a comment are leaves of
+        // their own kinds, and a keyword has no named kind at all, so none of them is in this list.
+        matches!(node.kind(), "identifier" | "type_identifier" | "field_identifier" | "shorthand_field_identifier")
+            .then(|| node.byte_range())
+    }
+
     /// Makes the tree the parse of `text`: from the tree of the text before it, told what changed,
     /// when there is one.
     fn sync(&mut self, text: &TextSnapshot) {
@@ -226,6 +389,7 @@ impl Engine {
             return;
         }
         let mut reuse = false;
+        let mut edit = None;
         match (self.text.diff(text), self.tree.as_mut()) {
             (None, Some(_)) => {
                 self.text = text.clone();
@@ -246,6 +410,7 @@ impl Engine {
                     new_end_position: point_at(text, new.end),
                 });
                 reuse = true;
+                edit = Some((old, new));
             }
             _ => {}
         }
@@ -258,11 +423,24 @@ impl Engine {
             previous,
             None,
         );
+        // Where the shape of the tree is other than the one the edit was made to.
+        let changed: Vec<Range<usize>> = match (&parsed, previous) {
+            (Some(tree), Some(before)) => tree
+                .changed_ranges(before)
+                .map(|range| range.start_byte..range.end_byte)
+                .collect(),
+            _ => Vec::new(),
+        };
         if reuse && parsed.is_some() {
             self.incremental_parses += 1;
         }
         self.tree = parsed;
         self.text = text.clone();
+        match edit {
+            Some((old, new)) if reuse && self.tree.is_some() => self.keep_cache_over(text, old, new, changed),
+            // A tree made from nothing says nothing of what the old one held.
+            _ => self.cache = None,
+        }
     }
 }
 

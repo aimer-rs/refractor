@@ -300,8 +300,7 @@ fn ranges_of(embedder: &aimer::input::input::TextEmbedder) -> Vec<Range<usize>> 
 #[test]
 fn the_embedder_embeds_each_rendered_block_and_none_that_is_written() {
     let highlighter = highlighter();
-    let on_open: Rc<dyn Fn(usize)> = Rc::new(|_| {});
-    let embedder = highlighter.doc_embedder(on_open);
+    let embedder = highlighter.doc_embedder();
     let embeds = ranges_of(&embedder);
     assert_eq!(embeds, vec![0..offset_of(DOCS, "\n\n"), offset_of(DOCS, "/// A")..offset_of(DOCS, "\npub struct")]);
     highlighter.toggle_doc_block(2);
@@ -337,15 +336,6 @@ fn a_block_shown_as_written_stays_with_its_lines_when_lines_are_added_above_it()
 }
 
 #[test]
-fn typing_into_a_rendered_block_shows_it_as_written() {
-    let text = TextSnapshot::from_text(DOCS);
-    let highlighter = highlighter();
-    assert!(highlighter.open_doc_block_at(&text, 2));
-    assert_eq!(highlighter.doc_block_at(&text, 2), Some(false));
-    assert!(!highlighter.open_doc_block_at(&text, 3), "code is not a doc block");
-}
-
-#[test]
 fn a_rendered_block_has_a_bar_at_its_indent_and_a_written_one_has_none() {
     let source = "/// one\n    /// two\nfn f() {}\n";
     let text = TextSnapshot::from_text(source);
@@ -354,4 +344,225 @@ fn a_rendered_block_has_a_bar_at_its_indent_and_a_written_one_has_none() {
     assert_eq!(highlighter.doc_bar(&text, 2), None, "code has none");
     highlighter.toggle_doc_block(0);
     assert_eq!(highlighter.doc_bar(&text, 0), None);
+}
+
+/// A Rust text of about `lines` lines with strings, comments, docs, attributes and nesting in it.
+fn program(lines: usize) -> String {
+    let mut text = String::new();
+    for number in 0..lines / 8 + 1 {
+        text.push_str(&format!(
+            "/// Doc line for item {number}, with `code`.\n#[derive(Debug)]\npub struct Item{number} {{\n    name: &'static str, // a comment {number}\n}}\n\nfn run_{number}(value: u32) -> u32 {{\n    let text = \"caf\u{e9} {number}\"; value + {number}\n}}\n"
+        ));
+    }
+    text
+}
+
+/// A source of numbers that is the same on every run.
+struct Lcg(u64);
+
+impl Lcg {
+    fn next(&mut self, below: usize) -> usize {
+        self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        ((self.0 >> 33) as usize) % below.max(1)
+    }
+}
+
+/// What a query of the whole text gives, which the cache must always agree with.
+fn expected(highlighter: &SyntaxHighlighter, text: &TextSnapshot) -> Vec<StyledRange> {
+    highlighter.uncached_ranges(text, whole(text))
+}
+
+fn overlapping(ranges: &[StyledRange], window: &Range<usize>) -> Vec<StyledRange> {
+    ranges
+        .iter()
+        .filter(|range| range.range.start < window.end && range.range.end > window.start)
+        .cloned()
+        .collect()
+}
+
+#[test]
+fn the_highlight_kept_between_edits_is_the_one_a_new_query_gives_after_any_edit() {
+    let pieces = ["\"", "'", "/*", "*/", "//", "///", "{", "}", "(", ")", "\n", " ", "x", "fn ", "r#\"", "#", "\\", "\u{e9}", "0", "::", "<", ">", ";"];
+    let mut random = Lcg(7);
+    let mut source = program(40);
+    let highlighter = highlighter();
+    let first = TextSnapshot::from_text(&source);
+    assert_eq!(highlighter.ranges(&first, whole(&first)), expected(&highlighter, &first));
+
+    for step in 0..300 {
+        let boundaries: Vec<usize> = source.char_indices().map(|(at, _)| at).chain([source.len()]).collect();
+        let at = boundaries[random.next(boundaries.len())];
+        let what = if random.next(3) == 0 && at < source.len() {
+            let end = boundaries[(boundaries.iter().position(|b| *b == at).unwrap() + 1 + random.next(12)).min(boundaries.len() - 1)];
+            source.replace_range(at..end, "");
+            format!("delete {at}..{end}")
+        } else {
+            let piece = pieces[random.next(pieces.len())];
+            source.insert_str(at, piece);
+            format!("insert {piece:?} at {at}")
+        };
+        let text = TextSnapshot::from_text(&source);
+        // Now and then only a window is asked for, as a scrolled field does, and the whole text later.
+        if step % 5 == 2 {
+            let start = boundaries[random.next(boundaries.len())].min(source.len());
+            let window = start.min(source.len())..(start + 400).min(source.len());
+            let window = window.start.min(window.end)..window.end;
+            let kept = highlighter.ranges(&text, window.clone());
+            let all = expected(&highlighter, &text);
+            assert_eq!(kept, overlapping(&all, &window), "step {step}, a window {window:?} after {what}");
+        }
+        let kept = highlighter.ranges(&text, whole(&text));
+        let all = expected(&highlighter, &text);
+        assert_eq!(kept, all, "step {step}: the kept highlight differs from a new query after {what}");
+    }
+}
+
+#[test]
+fn an_edit_asks_tree_sitter_again_only_about_the_lines_it_touched() {
+    let source = program(4000);
+    let highlighter = highlighter();
+    let text = TextSnapshot::from_text(&source);
+    let _ = highlighter.ranges(&text, whole(&text));
+    let first = highlighter.queried_bytes();
+    assert!(first >= source.len() - 100, "the first request asks for all of it: {first} of {}", source.len());
+
+    let middle = source[..source.len() / 2].rfind('\n').expect("a line") + 1;
+    let edited = text.with_replaced(middle..middle, "x");
+    let _ = highlighter.ranges(&edited, whole(&edited));
+    let asked = highlighter.queried_bytes() - first;
+    assert!(asked < 1000, "one character asked about {asked} bytes of {}", source.len());
+    assert_eq!(highlighter.ranges(&edited, whole(&edited)), expected(&highlighter, &edited));
+
+    // The same text asked for again asks for nothing.
+    let before = highlighter.queried_bytes();
+    let _ = highlighter.ranges(&edited, whole(&edited));
+    assert_eq!(highlighter.queried_bytes(), before, "nothing changed");
+}
+
+#[test]
+fn scrolling_asks_only_about_the_lines_that_come_into_view() {
+    let source = program(4000);
+    let highlighter = highlighter();
+    let text = TextSnapshot::from_text(&source);
+    let _ = highlighter.ranges(&text, 10_000..14_000);
+    let first = highlighter.queried_bytes();
+    assert_eq!(first, 4000);
+    let _ = highlighter.ranges(&text, 10_500..14_500);
+    assert_eq!(highlighter.queried_bytes() - first, 500, "the half-window that is new");
+    let _ = highlighter.ranges(&text, 9_800..13_000);
+    assert_eq!(highlighter.queried_bytes() - first, 500 + 200, "and the other way");
+    let _ = highlighter.ranges(&text, 11_000..12_000);
+    assert_eq!(highlighter.queried_bytes() - first, 700, "a window already held asks for nothing");
+    // A window far from what is held is a new start.
+    assert_eq!(highlighter.ranges(&text, 100_000..100_500), overlapping(&expected(&highlighter, &text), &(100_000..100_500)));
+}
+
+#[test]
+fn undoing_and_redoing_edits_keeps_the_highlight_right() {
+    let mut source = program(60);
+    let highlighter = highlighter();
+    let mut history = vec![source.clone()];
+    let first = TextSnapshot::from_text(&source);
+    let _ = highlighter.ranges(&first, whole(&first));
+    let mut random = Lcg(3);
+    for _ in 0..40 {
+        let at = (0..source.len()).filter(|at| source.is_char_boundary(*at)).nth(random.next(source.len() / 2)).unwrap_or(0);
+        source.insert_str(at, ["\"", "/*", "x", "\n", "{"][random.next(5)]);
+        history.push(source.clone());
+        let text = TextSnapshot::from_text(&source);
+        let _ = highlighter.ranges(&text, whole(&text));
+    }
+    // Holding undo goes back through all of them, one value at a time, and redo goes forward.
+    for version in history.iter().rev().chain(history.iter()) {
+        let text = TextSnapshot::from_text(version);
+        assert_eq!(highlighter.ranges(&text, whole(&text)), expected(&highlighter, &text));
+    }
+}
+
+#[test]
+fn typing_an_opening_comment_a_character_at_a_time_restyles_the_text_after_it() {
+    let source = program(120);
+    let at = source.find("fn run_3(").expect("a line") - 1;
+    let highlighter = highlighter();
+    let mut text = TextSnapshot::from_text(&source);
+    let _ = highlighter.ranges(&text, whole(&text));
+    for (n, typed) in ["/", "*"].into_iter().enumerate() {
+        text = text.with_replaced(at + n..at + n, typed);
+        let kept = highlighter.ranges(&text, whole(&text));
+        let fresh = self::highlighter().ranges(&text, whole(&text));
+        let after = source.find("fn run_9(").expect("a later line") + 2;
+        assert_eq!(kept, fresh, "after typing {typed:?}");
+        if n == 1 {
+            assert_eq!(
+                style_at(&kept, after).and_then(|style| style.color),
+                Some(SyntaxPalette::dark().comment),
+                "the code below an opened comment is in it"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_highlight_follows_a_quote_typed_undone_and_a_comment_opened_after_it() {
+    let source = program(120);
+    let at = source.find("fn run_3(").expect("a line") - 1;
+    let highlighter = highlighter();
+    let original = TextSnapshot::from_text(&source);
+    let _ = highlighter.ranges(&original, whole(&original));
+    let after = source.find("fn run_9(").expect("a later line") + 2;
+    let mut text = original.clone();
+    let steps: [(&str, Box<dyn Fn(&TextSnapshot) -> TextSnapshot>); 4] = [
+        ("type a quote", Box::new(move |text| text.with_replaced(at..at, "\""))),
+        // Undo hands back the text as it was, made apart and sharing nothing with the one before.
+        ("undo it", Box::new(move |_| TextSnapshot::from_text(&program(120)))),
+        ("type a slash", Box::new(move |text| text.with_replaced(at..at, "/"))),
+        ("type a star", Box::new(move |text| text.with_replaced(at + 1..at + 1, "*"))),
+    ];
+    for (what, step) in steps {
+        text = step(&text);
+        let kept = highlighter.ranges(&text, whole(&text));
+        let fresh = self::highlighter().ranges(&text, whole(&text));
+        assert_eq!(kept, fresh, "after {what}");
+        let query = highlighter.uncached_ranges(&text, whole(&text));
+        assert_eq!(kept, query, "after {what}, against the same tree asked again");
+    }
+    assert_eq!(style_at(&highlighter.ranges(&text, whole(&text)), after).and_then(|style| style.color), Some(SyntaxPalette::dark().comment));
+}
+
+const LINKS: &str = "// call helper here\nfn helper() -> Point {\n    let text = \"helper\";\n    let raw = r#\"helper\"#;\n    let n = 42;\n    println!(\"{}\", helper());\n    Point { x: n }\n}\n";
+
+#[test]
+fn only_a_name_is_a_link_and_not_a_comment_a_string_a_raw_string_a_keyword_or_a_number() {
+    let text = TextSnapshot::from_text(LINKS);
+    let syntax = highlighter();
+    let link = |needle: &str, nth: usize| {
+        let at = LINKS.match_indices(needle).nth(nth).unwrap_or_else(|| panic!("{needle:?} #{nth} is in the text")).0;
+        syntax.link_at(&text, at)
+    };
+    assert_eq!(link("helper", 1), Some(LINKS.find("fn helper").unwrap() + 3..LINKS.find("fn helper").unwrap() + 9), "a function's name where it is declared");
+    assert_eq!(link("helper", 0), None, "a word of a comment");
+    assert_eq!(link("helper", 2), None, "a word of a string");
+    assert_eq!(link("helper", 3), None, "a word of a raw string");
+    let call = LINKS.rfind("helper").unwrap();
+    assert_eq!(link("helper", 4), Some(call..call + 6), "a call of it");
+    assert_eq!(link("Point", 0).map(|range| range.len()), Some(5), "a type");
+    assert_eq!(link("x:", 0).map(|range| range.len()), Some(1), "a field");
+    assert_eq!(link("println", 0).map(|range| range.len()), Some(7), "a macro's name");
+    assert_eq!(link("let", 0), None, "a keyword");
+    assert_eq!(link("fn", 0), None, "a keyword");
+    assert_eq!(link("42", 0), None, "a number");
+    assert_eq!(link("{}", 0), None, "a format string");
+    assert_eq!(syntax.link_at(&text, LINKS.len()), None, "the end of the text");
+    assert_eq!(syntax.link_at(&text, LINKS.len() + 50), None, "past the end");
+}
+
+#[test]
+fn a_link_is_found_in_bytes_after_wide_characters_and_in_an_empty_or_unfinished_text() {
+    let source = "let caf\u{e9} = 1; // \u{e9}\nlet \u{e9}t\u{e9} = caf\u{e9};";
+    let text = TextSnapshot::from_text(source);
+    let syntax = highlighter();
+    let second = source.rfind("caf\u{e9}").unwrap();
+    assert_eq!(syntax.link_at(&text, second), Some(second..second + 5), "a name with an accent is five bytes");
+    assert_eq!(syntax.link_at(&TextSnapshot::from_text(""), 0), None, "no text");
+    assert_eq!(syntax.link_at(&TextSnapshot::from_text("fn ("), 1), None, "text that does not parse");
 }

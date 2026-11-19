@@ -16,11 +16,11 @@ const HEADING_SIZES: [u32; 6] = [22, 19, 17, 15, 14, 14];
 const TEXT: Color = Color::Rgba(232, 230, 240, 255);
 const MUTED: Color = Color::Rgba(138, 136, 154, 255);
 const LINK: Color = Color::Rgba(84, 205, 236, 255);
-const ACCENT: Color = Color::Rgba(255, 92, 150, 255);
+const ACCENT: Color = Color::Rgb(141, 5, 87);
 /// The color of a rendered doc comment: a muted green-grey, which reads as prose set apart from the code
 /// and not as a comment.
 pub const DOC: Color = Color::Rgba(124, 158, 134, 255);
-const CODE_BACKGROUND: Color = Color::Rgba(255, 255, 255, 22);
+const CODE_BACKGROUND: Color = Color::Rgba(255, 255, 255, 1);
 
 /// A live preview in the editor's look. Make one for a document and clone it: clones share the parse,
 /// so moving the caret between lines walks the tree again and does not parse.

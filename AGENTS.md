@@ -40,6 +40,7 @@ requested scope.
 
 ## Additional Guidelines
 
+- Prefer define the constant as assioated to a type for better ownership.
 - Prefer `.expect("why it cannot fail")` over `.unwrap()`.
 - Use `unchecked` methods only where the context makes undefined behavior impossible, and say why.
 - Keep `unsafe` blocks minimal and document their safety invariants.

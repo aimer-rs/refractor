@@ -11,12 +11,19 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 [dependencies]
 # aimer = {git="https://github.com/Cottons29/aimer.git", branch = "main"}
 
-aimer = { path = "../aimer", features = ["provider", "svg", "icons", "native", "markdown"] }
+aimer = { path = "../aimer", features = ["provider", "svg", "icons", "native", "markdown", "lottie"] }
 
 # Tree-sitter, for the syntax of the code on screen. It is already in the framework's graph
 # (the markdown renderer uses it for code blocks); the app reads its parser directly because it
 # parses incrementally, which the framework's highlighter does not.
-arborium = { version = "2.18.0", default-features = false, features = ["lang-rust"] }
+arborium = { version = "2.18.0", default-features = false, features = ["lang-rust", "lang-toml", "lang-markdown", "lang-json","lang-html"] }
+
+# The language server protocol: its message types (and nothing of how to talk to a server), used only
+# inside `src/lsp/protocol.rs`. Pinned, since the crate's 0.x releases change its types.
+lsp-types = "=0.97.0"
+# The JSON the protocol is written in.
+serde = "1.0.229"
+serde_json = "1.0.149"
 
 # Dev builds of these crates are optimized, which the aimer workspace's own profile does not
 # pass on to an app: the Unicode tables the text layout searches, and the byte-scan kernels, which
@@ -28,3 +35,6 @@ opt-level = 3
 
 [profile.dev.package.aimer_simd]
 opt-level = 3
+
+[profile.dev.package.arborium]
+opt-level = 2

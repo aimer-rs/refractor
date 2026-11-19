@@ -1,8 +1,13 @@
 mod breadcrumb;
+mod completion_caret;
+mod definition;
 mod editor_area;
 mod file_row;
 mod file_tree;
+mod lsp_badge;
 mod pane;
+mod problems_panel;
+mod spinner;
 mod side_panel;
 mod status_bar;
 mod tab;
@@ -70,8 +75,8 @@ impl StatelessWidget for EditorScreen {
                                             .height(f32::MAX)
                                             .min_width(SIDE_PANEL_MIN)
                                             .max_width(SIDE_PANEL_MAX)
-                                            .handle_thickness(8.0)
-                                            .handle_outset(3.0)
+                                            .handle_thickness(14.0)
+                                            .handle_outset(6.0)
                                             .direction(Direction::RIGHT)
                                             .child(SidePanel),
                                     )

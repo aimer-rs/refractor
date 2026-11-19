@@ -36,6 +36,10 @@ pub struct CodeTheme {
     pub deleted: Color,
     /// Something went wrong.
     pub warning: Color,
+    /// Nothing is wrong: the language server has nothing against the file.
+    pub success: Color,
+    /// Something may be: the warnings of the language server.
+    pub caution: Color,
 }
 
 impl CodeTheme {
@@ -46,7 +50,7 @@ impl CodeTheme {
             editor: Color::Rgb(10, 10, 15),
             divider: Color::Rgb(34, 33, 45),
             text: Color::Rgb(232, 230, 240),
-            muted: Color::Rgb(138, 136, 154),
+            muted: Color::Rgb(160, 0, 99),
             accent: Color::Rgb(84, 205, 236),
             marker: Color::Rgb(255, 92, 150),
             selected: Color::Rgb(60, 34, 72),
@@ -58,6 +62,8 @@ impl CodeTheme {
             selection: Color::Rgb(118, 72, 170).with_alpha(0.5),
             deleted: Color::Rgb(238, 108, 108),
             warning: Color::Rgb(240, 124, 112),
+            success: Color::Rgb(112, 200, 152),
+            caution: Color::Rgb(236, 190, 96),
         }
     }
 }

@@ -3,12 +3,13 @@ use crate::components::pad::pad;
 use crate::document::Document;
 use crate::file_icons::file_icon;
 use crate::fonts;
+use crate::screen::editor::lsp_badge::LspBadge;
 use crate::theme::CodeTheme;
 use aimer::input::ControllerListener;
 use aimer::style::{LayoutSpacing, Theme};
 use aimer::{
-    BoxAlignment, BuildContext, Container, Icons, Key, Row, SizedBox, State, StateUpdater,
-    StateView, StatefulWidget, Text, Widget,
+    BoxAlignment, BuildContext, Container, Expanded, Icons, Key, NumberExt, Row, SizedBox, State,
+    StateUpdater, StateView, StatefulWidget, Text, Widget, ZeroSizedBox,
 };
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -33,6 +34,8 @@ impl Breadcrumb {
             path,
         }
     }
+
+    pub const HEIGHT: i32 = 20;
 }
 
 struct BreadcrumbState {
@@ -67,18 +70,14 @@ impl State<Breadcrumb> for BreadcrumbState {
 
     fn on_mount(&mut self, updater: StateUpdater<Self>) {
         let document = Rc::clone(&self.document);
-        self.listener = Some(
-            self.document
-                .controller
-                .listen(move |_| {
-                    let symbol = Self::symbol(&document);
-                    updater.try_set_state(move |state| {
-                        if state.symbol != symbol {
-                            state.symbol = symbol;
-                        }
-                    });
-                }),
-        );
+        self.listener = Some(self.document.controller.listen(move |_| {
+            let symbol = Self::symbol(&document);
+            updater.try_set_state(move |state| {
+                if state.symbol != symbol {
+                    state.symbol = symbol;
+                }
+            });
+        }));
     }
 
     fn adopt_config_from(&mut self, new: Self) {
@@ -87,20 +86,13 @@ impl State<Breadcrumb> for BreadcrumbState {
 
     fn build(this: StateView<Self>, ctx: &BuildContext) -> impl Widget {
         let theme = *CodeTheme::of(ctx);
-        let muted = fonts::ui()
-            .font_size(12)
-            .color(theme.muted);
-        let strong = fonts::ui()
-            .font_size(12)
-            .color(theme.text);
+        let muted = fonts::ui().font_size(12).color(theme.muted);
+        let strong = fonts::ui().font_size(12).color(theme.text);
         let separator = || icon(Icons::CHEVRON_RIGHT, 12, theme.muted).boxed();
         let names: Vec<String> = this
             .path
             .iter()
-            .map(|part| {
-                part.to_string_lossy()
-                    .into_owned()
-            })
+            .map(|part| part.to_string_lossy().into_owned())
             .collect();
         let last = names.len().saturating_sub(1);
         let mut parts = Vec::new();
@@ -110,17 +102,9 @@ impl State<Breadcrumb> for BreadcrumbState {
             }
             if index == last {
                 parts.push(material(file_icon(&name), 14).boxed());
-                parts.push(
-                    Text::new(name)
-                        .text_style(strong)
-                        .boxed(),
-                );
+                parts.push(Text::new(name).text_style(strong).boxed());
             } else {
-                parts.push(
-                    Text::new(name)
-                        .text_style(muted)
-                        .boxed(),
-                );
+                parts.push(Text::new(name).text_style(muted).boxed());
             }
         }
         if let Some(symbol) = &this.symbol {
@@ -131,17 +115,15 @@ impl State<Breadcrumb> for BreadcrumbState {
                     .boxed(),
             );
         }
-        SizedBox::new()
-            .height(26)
-            .box_child(
-                Container::new()
-                    .padding(pad(0, 14, 0, 14))
-                    .child(
-                        Row::new()
-                            .vertical_alignment(BoxAlignment::Center)
-                            .gaps(LayoutSpacing::all(4))
-                            .children(parts),
-                    ),
+
+        Container::new()
+            .height(Breadcrumb::HEIGHT)
+            .padding(pad(4, 14, 0, 14))
+            .child(
+                Row::new()
+                    .vertical_alignment(BoxAlignment::Center)
+                    .gaps(LayoutSpacing::all(4))
+                    .children(parts),
             )
     }
 }

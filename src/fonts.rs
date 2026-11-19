@@ -1,92 +1,81 @@
-//! The fonts: Google Sans for the window and JetBrains Mono for code, both embedded so the editor
-//! looks the same on every machine.
+//! The fonts: Google Sans for the window and JetBrains Mono for code. Both are variable fonts, so
+//! one file per style serves every weight, and both are listed under `[fonts]` in `Aimer.toml`
+//! rather than embedded in the code.
 
 use aimer::style::TextStyle;
-use aimer::{FontFamily, FontRegistration, FontRegistry, FontStyle, FontWeight};
+use aimer::{BundleFont, FontFamily, FontStyle, FontWeight};
+
+/// Typed handles for the entries under `[fonts]` in `Aimer.toml`.
+#[aimer::assets]
+struct Assets;
 
 const CODE: &str = "JetBrains Mono";
 const UI: &str = "Google Sans";
 
-/// The faces of a family: the bytes, the weight and the style each is registered as.
-type Faces = [(&'static [u8], FontWeight, FontStyle)];
-
-const CODE_FACES: &Faces = &[
-    (
-        include_bytes!("../assets/JetBrainsMono-2.304/fonts/ttf/JetBrainsMono-Regular.ttf"),
-        FontWeight::Normal,
-        FontStyle::Normal,
-    ),
-    (
-        include_bytes!("../assets/JetBrainsMono-2.304/fonts/ttf/JetBrainsMono-Bold.ttf"),
-        FontWeight::Bold,
-        FontStyle::Normal,
-    ),
-    (
-        include_bytes!("../assets/JetBrainsMono-2.304/fonts/ttf/JetBrainsMono-Italic.ttf"),
-        FontWeight::Normal,
-        FontStyle::Italic,
-    ),
-    (
-        include_bytes!("../assets/JetBrainsMono-2.304/fonts/ttf/JetBrainsMono-BoldItalic.ttf"),
-        FontWeight::Bold,
-        FontStyle::Italic,
-    ),
-];
-
-const UI_FACES: &Faces = &[
-    (
-        include_bytes!("../assets/Google_Sans/static/GoogleSans-Regular.ttf"),
-        FontWeight::Normal,
-        FontStyle::Normal,
-    ),
-    (
-        include_bytes!("../assets/Google_Sans/static/GoogleSans-Medium.ttf"),
-        FontWeight::Value(500),
-        FontStyle::Normal,
-    ),
-    (
-        include_bytes!("../assets/Google_Sans/static/GoogleSans-Bold.ttf"),
-        FontWeight::Bold,
-        FontStyle::Normal,
-    ),
-];
+/// The faces of a family: an upright and an italic variable font. Each registers once, as regular
+/// weight; the weight a piece of text asks for selects the `wght` instance of that face.
+fn faces(family: &'static str) -> [BundleFont; 2] {
+    let (upright, italic) = if family == UI {
+        (Assets::GOOGLE_SANS, Assets::GOOGLE_SANS_ITALIC)
+    } else {
+        (Assets::JETBRAINS_MONO, Assets::JETBRAINS_MONO_ITALIC)
+    };
+    [
+        upright.family(family).weight(FontWeight::Normal).style(FontStyle::Normal),
+        italic.family(family).weight(FontWeight::Normal).style(FontStyle::Italic),
+    ]
+}
 
 /// Registers the faces of both families. Call it once, before the app starts; calling it again does
 /// nothing. A face that cannot be registered is reported, and text set in its family falls back to the
 /// generic fonts ([`ui_family`], [`code_family`]).
 pub fn register() {
-    register_family(UI, UI_FACES);
-    register_family(CODE, CODE_FACES);
-}
-
-fn register_family(family: &str, faces: &Faces) {
-    if FontRegistry::family(family).is_some() {
-        return;
-    }
-    for (bytes, weight, style) in faces {
-        if let Err(error) = FontRegistry::register(FontRegistration {
-            family,
-            bytes,
-            weight: *weight,
-            style: *style,
-        }) {
-            aimer::console::warn!("Could not register {family}: {error:?}");
+    for family in [UI, CODE] {
+        for face in faces(family) {
+            if let Err(error) = face.register() {
+                aimer::console::warn!("Could not register {family} ({}): {error:?}", face.path());
+            }
         }
     }
 }
 
 /// The family code is set in: JetBrains Mono, or the generic monospace font if it is not registered.
 pub fn code_family() -> FontFamily {
-    FontRegistry::family(CODE).unwrap_or(FontFamily::MONOSPACE)
+    aimer::FontRegistry::family(CODE).unwrap_or(FontFamily::MONOSPACE)
 }
 
 /// The family the window is set in: Google Sans, or the generic sans-serif font if it is not registered.
 pub fn ui_family() -> FontFamily {
-    FontRegistry::family(UI).unwrap_or(FontFamily::SANS_SERIF)
+    aimer::FontRegistry::family(UI).unwrap_or(FontFamily::SANS_SERIF)
 }
 
 /// A text style for the window's own text, in Google Sans. Every piece of text that is not code starts
 /// from this, since the framework has no way to change the font of all of it at once.
 pub fn ui() -> TextStyle {
     TextStyle::new().font_family(ui_family())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aimer::FontRegistry;
+
+    #[test]
+    fn registers_both_variable_families_with_one_face_per_style() {
+        register();
+        // A second call must not register anything twice.
+        register();
+        for (name, family) in [(UI, ui_family()), (CODE, code_family())] {
+            assert_eq!(FontRegistry::family(name), Some(family), "{name} is registered");
+            let regular = FontRegistry::resolve(family, FontWeight::Normal, FontStyle::Normal)
+                .expect("the upright face is registered");
+            let bold = FontRegistry::resolve(family, FontWeight::Bold, FontStyle::Normal)
+                .expect("a bold request resolves");
+            // One variable face serves every weight, so bold is the same face as regular.
+            assert_eq!(regular.face_id, bold.face_id, "{name} bold shares the variable face");
+            let italic = FontRegistry::resolve(family, FontWeight::Normal, FontStyle::Italic)
+                .expect("the italic face is registered");
+            assert_ne!(regular.face_id, italic.face_id, "{name} italic is its own face");
+        }
+    }
 }

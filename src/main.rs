@@ -1,10 +1,12 @@
 mod app_shell;
+mod completion;
 mod components;
 mod doc_comments;
 mod document;
 mod file_icons;
 mod fonts;
 mod git;
+mod lsp;
 mod markdown;
 mod screen;
 mod syntax;

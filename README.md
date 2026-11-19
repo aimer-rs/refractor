@@ -15,9 +15,11 @@ A code editor built with the [Aimer](https://github.com/aimer-rs/aimer) framewor
   is written through a link to the file the link points to. A file with unsaved changes has a dot on its tab, and
   closing its tab asks twice.
 - Renders markdown: a `.md` file shows rendered wherever the caret is not (the line the caret is on shows its
-  source), and so do the doc comments (`///`, `//!`) of Rust, in the UI font with a bar down their left. A button
-  before the line number of each doc comment (a book while it is rendered, a pen while it is shown as written)
-  switches that comment between the two. See `src/markdown.rs` and `src/doc_comments.rs`.
+  source). The doc comments (`///`, `//!`) of Rust are drawn by the framework's markdown viewer, in the UI font
+  in a muted green, with one bar down the whole comment: a rendered comment stands in for all its lines, so it has
+  one line number and the height of its text. A button before the line number (a book while it is rendered, a pen
+  while it is shown as written) switches the comment; so does a click on it, and typing into it. Return in a doc
+  comment goes on with `///`. See `src/markdown.rs` and `src/doc_comments.rs`.
 - Colors Rust by its syntax. The parse is kept between keystrokes and made again from the previous tree, so
   an edit costs the part of the tree it changed, and only the lines on screen are styled.
 - Shows where the file is under the tabs: the path from the folder and the item the caret is inside of

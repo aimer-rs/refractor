@@ -5,10 +5,11 @@
 //! as what they mean), standing in for all the lines of the block, which is why the block has one line
 //! number and the height of its rendered text.
 //!
-//! A rendered block is not edited in place. It is shown as written by the button in the margin, by a
-//! click on it, and by typing into it ([`DocRenderer::open_at`]); [`DocRenderer::toggle`] switches one.
-//! A block is told apart by its first line, and the lines are kept on their blocks as the text is
-//! edited ([`DocRenderer::edited`]).
+//! A rendered block is not edited in place, and its text cannot be changed while it is rendered:
+//! [`DocRenderer::protects`] says which edits that refuses. Only the button in the margin shows one as
+//! written ([`DocRenderer::toggle`]): nothing else does, not a click on it, nor the caret going into it,
+//! nor an edit. A block is told apart by its first line, and the lines are kept on their blocks as the
+//! text is edited ([`DocRenderer::edited`]).
 
 use std::borrow::Cow;
 use std::collections::{BTreeSet, HashMap};
@@ -16,11 +17,10 @@ use std::hash::{Hash, Hasher};
 use std::ops::Range;
 use std::rc::Rc;
 
+use aimer::Container;
 use aimer::MarkdownTheme;
-use aimer::input::button::Button;
 use aimer::input::input::{TextEmbed, TextSnapshot};
 use aimer::style::LayoutSpacing;
-use aimer::Container;
 
 /// How wide, in logical pixels, the gap is between the bar of a rendered block and its text.
 pub const GAP: f32 = 24.0;
@@ -67,7 +67,11 @@ fn prefix_of(line: &str) -> Option<Prefix> {
     } else {
         (Marker::Inner, trimmed.strip_prefix("//!")?)
     };
-    Some(Prefix { marker, indent, text: indent + 3 + usize::from(rest.starts_with(' ')) })
+    Some(Prefix {
+        marker,
+        indent,
+        text: indent + 3 + usize::from(rest.starts_with(' ')),
+    })
 }
 
 /// What a new line starts with when Return is pressed at the end of `before`, the text of a line up to
@@ -114,25 +118,90 @@ fn marker_of(text: &TextSnapshot, number: usize) -> Option<Marker> {
 /// Whether line `number` is the first line of a block.
 pub fn is_block_start(text: &TextSnapshot, number: usize) -> bool {
     number < text.line_count()
-        && marker_of(text, number).is_some_and(|marker| number == 0 || marker_of(text, number - 1) != Some(marker))
+        && marker_of(text, number)
+            .is_some_and(|marker| number == 0 || marker_of(text, number - 1) != Some(marker))
 }
 
 /// The block that holds line `number`, if it is a doc comment and its block is not too long.
 pub fn block_at(text: &TextSnapshot, number: usize) -> Option<DocBlock> {
-    if number >= text.line_count() {
+    block_around(number, text.line_count(), &|line| marker_of(text, line))
+}
+
+/// [`block_at`] with the kind of each line given by `marker`, and the number of lines known.
+fn block_around(
+    number: usize,
+    line_count: usize,
+    marker: &dyn Fn(usize) -> Option<Marker>,
+) -> Option<DocBlock> {
+    if number >= line_count {
         return None;
     }
-    let marker = marker_of(text, number)?;
+    let kind = marker(number)?;
     let mut first = number;
-    while first > 0 && number - first < MAX_BLOCK_LINES && marker_of(text, first - 1) == Some(marker) {
+    while first > 0 && number - first < MAX_BLOCK_LINES && marker(first - 1) == Some(kind) {
         first -= 1;
     }
-    let last_possible = text.line_count() - 1;
+    let last_possible = line_count - 1;
     let mut last = number;
-    while last < last_possible && last - number < MAX_BLOCK_LINES && marker_of(text, last + 1) == Some(marker) {
+    while last < last_possible && last - number < MAX_BLOCK_LINES && marker(last + 1) == Some(kind)
+    {
         last += 1;
     }
-    (last - first < MAX_BLOCK_LINES).then_some(DocBlock { first_line: first, last_line: last })
+    (last - first < MAX_BLOCK_LINES).then_some(DocBlock {
+        first_line: first,
+        last_line: last,
+    })
+}
+
+/// The longest a line is held, in bytes, while looking for its marker across the pieces of the text.
+/// The marker is after the indent, so a line with more indent than this is asked about by itself.
+const MAX_HELD_LINE: usize = 1024;
+
+/// The kind of doc comment each of the lines `first` to `last` is, in order, found in one pass over
+/// their text. Asking for each line on its own looks it up in the tree of the text, which costs far more
+/// than reading it.
+fn markers_of(text: &TextSnapshot, first: usize, last: usize) -> Vec<Option<Marker>> {
+    let count = last + 1 - first;
+    let mut markers = Vec::with_capacity(count);
+    let bytes = text.line_range(first).start..text.line_range(last).end;
+    // The start of the line that a piece of text ends in the middle of, for the next piece to go on.
+    let mut held = String::new();
+    let mut too_long = false;
+    let kind_of = |line: &str| prefix_of(line).map(|prefix| prefix.marker);
+    for piece in text.chunks(bytes) {
+        let mut rest = piece;
+        while let Some(at) = rest.find('\n') {
+            let head = &rest[..at];
+            let marker = if held.is_empty() && !too_long {
+                kind_of(head)
+            } else if too_long || held.len() + head.len() > MAX_HELD_LINE {
+                marker_of(text, first + markers.len())
+            } else {
+                held.push_str(head);
+                kind_of(&held)
+            };
+            markers.push(marker);
+            held.clear();
+            too_long = false;
+            rest = &rest[at + 1..];
+        }
+        if !too_long {
+            if held.len() + rest.len() > MAX_HELD_LINE {
+                too_long = true;
+            } else {
+                held.push_str(rest);
+            }
+        }
+    }
+    // A last line that is not ended by a line break.
+    if markers.len() < count {
+        markers.push(if too_long {
+            marker_of(text, first + markers.len())
+        } else {
+            kind_of(&held)
+        });
+    }
+    markers
 }
 
 /// The blocks that have a line in `bytes`.
@@ -141,11 +210,28 @@ pub fn blocks_in(text: &TextSnapshot, bytes: Range<usize>) -> Vec<DocBlock> {
         return Vec::new();
     }
     let first = text.byte_to_line(bytes.start.min(text.len()));
-    let last = text.byte_to_line(bytes.end.max(bytes.start).saturating_sub(1).min(text.len()));
+    let last = text.byte_to_line(
+        bytes
+            .end
+            .max(bytes.start)
+            .saturating_sub(1)
+            .min(text.len()),
+    );
+    // The lines of the window are read in one pass. A block that reaches out of it is followed to its
+    // ends one line at a time, which is a few lines and not the file.
+    let window = markers_of(text, first, last);
+    let marker = |number: usize| {
+        if (first..=last).contains(&number) {
+            window[number - first]
+        } else {
+            marker_of(text, number)
+        }
+    };
+    let line_count = text.line_count();
     let mut blocks: Vec<DocBlock> = Vec::new();
     let mut number = first;
     while number <= last {
-        match block_at(text, number) {
+        match block_around(number, line_count, &marker) {
             Some(block) => {
                 number = block.last_line + 1;
                 blocks.push(block);
@@ -172,7 +258,10 @@ pub struct DocRenderer {
 impl DocRenderer {
     /// A renderer whose blocks are drawn with `theme`.
     pub fn new(theme: MarkdownTheme) -> Self {
-        Self { theme, as_written: BTreeSet::new() }
+        Self {
+            theme,
+            as_written: BTreeSet::new(),
+        }
     }
 
     /// Whether the block that starts on `first_line` is shown rendered.
@@ -188,16 +277,83 @@ impl DocRenderer {
         }
     }
 
-    /// Shows as written the rendered block that holds line `number`, if there is one: what typing into
-    /// a rendered block does, since there is nothing in it to type into. Returns whether one was opened.
-    pub fn open_at(&mut self, text: &TextSnapshot, number: usize) -> bool {
-        match block_at(text, number) {
-            Some(block) if self.is_rendered(block.first_line) => {
-                self.as_written.insert(block.first_line);
-                true
-            }
-            _ => false,
+    /// Whether an edit that removes the bytes `removed` of `text` (or inserts at `removed.start`, when
+    /// the range is empty) would change the text of a rendered block, which is immutable while it is
+    /// rendered. That is an edit that lands on any of its lines, line breaks included, and one that
+    /// removes the line break at its edge so that the code beside it joins its first or last line.
+    /// Whole lines beside a block, and the line breaks between them, can still be edited.
+    ///
+    /// The cost is that of the lines the edit touches, which for a caret is one.
+    pub fn protects(&self, text: &TextSnapshot, removed: Range<usize>) -> bool {
+        let len = text.len();
+        let start = removed.start.min(len);
+        let end = removed.end.min(len).max(start);
+        if len == 0 {
+            return false;
         }
+        // The lines the edit lands on. A removal that ends at the start of a line leaves that line
+        // alone but takes the line break that ends the line above.
+        let first = text.byte_to_line(start);
+        let last = text.byte_to_line(if end > start { end - 1 } else { start });
+        let mut number = first;
+        while number <= last {
+            match block_at(text, number) {
+                Some(block) => {
+                    if self.is_rendered(block.first_line) {
+                        return true;
+                    }
+                    number = block.last_line + 1;
+                }
+                None => number += 1,
+            }
+        }
+        // A removal that ends where a block begins joins what is left of the line it began on to the
+        // first line of the block, unless it took that line from its start.
+        if end > start {
+            let below = text.byte_to_line(end);
+            return text.line_range(below).start == end
+                && is_block_start(text, below)
+                && self.is_rendered(below)
+                && start > text.line_range(text.byte_to_line(start)).start;
+        }
+        false
+    }
+
+    /// Whether Backspace (`backwards`) or Delete, pressed with the selection `selection`, would be an
+    /// edit [`Self::protects`] refuses: it removes the selection, or with none, the character before
+    /// or after the caret, which is a whole line break when the caret is next to one.
+    ///
+    /// Typing is refused by making the area read-only while the caret is where an edit would land in
+    /// a block. These two keys need more: at the start of a line they remove the line break above,
+    /// which is outside any block, and it is the line beside a block that gets joined to it.
+    pub fn refuses_deletion(
+        &self,
+        text: &TextSnapshot,
+        selection: Range<usize>,
+        backwards: bool,
+    ) -> bool {
+        let removed = if selection.is_empty() {
+            let caret = selection.start;
+            if backwards {
+                if caret == 0 {
+                    return false;
+                }
+                let crlf = text.byte_at(caret - 1) == Some(b'\n')
+                    && caret >= 2
+                    && text.byte_at(caret - 2) == Some(b'\r');
+                caret - if crlf { 2 } else { 1 }..caret
+            } else {
+                if caret >= text.len() {
+                    return false;
+                }
+                let crlf =
+                    text.byte_at(caret) == Some(b'\r') && text.byte_at(caret + 1) == Some(b'\n');
+                caret..caret + if crlf { 2 } else { 1 }
+            }
+        } else {
+            selection
+        };
+        self.protects(text, removed)
     }
 
     /// Keeps the blocks shown as written on their lines after an edit that replaced `removed` lines
@@ -233,9 +389,9 @@ impl DocRenderer {
     }
 
     /// The embeds of the rendered blocks that have a line in `window`: each stands for the whole block,
-    /// from the start of its first line to the end of its last, and draws its markdown. `on_open` is
-    /// called with the first line of a block when it is clicked.
-    pub fn embeds(&self, text: &TextSnapshot, window: Range<usize>, on_open: &Rc<dyn Fn(usize)>) -> Vec<TextEmbed> {
+    /// from the start of its first line to the end of its last, and draws its markdown. A click on one
+    /// does nothing to it: it is shown as written by the button in the margin and by nothing else.
+    pub fn embeds(&self, text: &TextSnapshot, window: Range<usize>) -> Vec<TextEmbed> {
         let mut seen: HashMap<u64, u64> = HashMap::new();
         let mut embeds = Vec::new();
         for block in blocks_in(text, window) {
@@ -243,21 +399,27 @@ impl DocRenderer {
                 continue;
             }
             let (markdown, indent) = markdown_of(text, &block);
-            let range = line_bytes(text, block.first_line).start..line_bytes(text, block.last_line).end;
+            let range =
+                line_bytes(text, block.first_line).start..line_bytes(text, block.last_line).end;
             let hashed = hash_of(&(&markdown, indent, block.first_line));
-            let occurrence = seen.entry(hashed).and_modify(|count| *count += 1).or_insert(0);
+            let occurrence = seen
+                .entry(hashed)
+                .and_modify(|count| *count += 1)
+                .or_insert(0);
             let key = hash_of(&(hashed, *occurrence));
-            let (theme, on_open, first_line) = (self.theme, Rc::clone(on_open), block.first_line);
+            let theme = self.theme;
             let markdown: Rc<str> = Rc::from(markdown);
             embeds.push(TextEmbed::new(range, key, move || {
-                let (markdown, on_open) = (Rc::clone(&markdown), Rc::clone(&on_open));
+                let markdown = Rc::clone(&markdown);
                 let left = indent_px(indent) + GAP;
-                // A click on the rendered block opens it as written: the way to edit it.
-                Button::new().no_decor().on_press(move || on_open(first_line)).build(move |_| {
-                    Container::new()
-                        .padding(LayoutSpacing::new().left(left as u32).top(4).bottom(6))
-                        .child(crate::markdown::doc_viewer(&markdown, &theme))
-                })
+                Container::new()
+                    .padding(
+                        LayoutSpacing::new()
+                            .left(left as u32)
+                            .top(4)
+                            .bottom(6),
+                    )
+                    .child(crate::markdown::doc_viewer(&markdown, &theme))
             }));
         }
         embeds
