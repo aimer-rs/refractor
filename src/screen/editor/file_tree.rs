@@ -23,11 +23,7 @@ impl StatelessWidget for FileTree {
         let items: Vec<_> = if rows.is_empty() {
             vec![
                 Text::new("This folder is empty")
-                    .text_style(
-                        fonts::ui()
-                            .font_size(13)
-                            .color(theme.muted),
-                    )
+                    .text_style(fonts::ui().font_size(13).color(theme.muted))
                     .boxed(),
             ]
         } else {

@@ -1,36 +1,41 @@
-use crate::completion::{Menu, MenuCell};
+use crate::completion::{Call, Label, Menu, MenuCell};
+use crate::components::badge::{Badge, Glyph, Hue};
+use crate::components::popup::{Anchor, Popup};
 use crate::fonts;
 use crate::lsp::{Item, ItemKind};
 use crate::theme::CodeTheme;
 use aimer::decoration::Decoration;
-use aimer::input::button::Button;
 use aimer::input::input::{CaretContext, DefaultCaret};
 use aimer::style::TextAlign;
 use aimer::style::{
-    BorderRadius, BorderSlice, BorderStyle, BoxBorder, BoxDecoration, LayoutSpacing, TextOverflow,
-    TextStyle, Theme,
+    BorderRadius, BorderSlice, BorderStyle, BoxBorder, BoxDecoration, FontWeight, LayoutSpacing,
+    TextOverflow, TextStyle, Theme,
 };
 use aimer::{
-    AnyWidget, BoxAlignment, BuildContext, Center, Color, Column, Container, Dimension, Expanded,
+    AnyWidget, BoxAlignment, BuildContext, Color, Column, Container, Dimension, Expanded,
     Positioned, Row as Line, SizedBox, Stack, State, StateUpdater, StateView, StatefulWidget, Text,
     Widget,
 };
+use std::cell::Cell;
 use std::rc::Rc;
 
 /// How tall a row of the menu is.
-const ROW_HEIGHT: u32 = 26;
+const ROW_HEIGHT: u32 = 23;
+/// The space under a row, between it and the next: none, as in the list of usages, where the row that is chosen marks itself.
+const ROW_GAP: u32 = 0;
+/// How far apart the tops of two rows are: what the list is measured in, by the height of the menu, by where a pointer is
+/// and by how far the wheel has turned it.
+const ROW_PITCH: u32 = ROW_HEIGHT + ROW_GAP;
 /// How tall the hint under the rows is.
-const FOOTER_HEIGHT: u32 = 28;
-/// How wide the menu is, and how much of it is the detail at the end of a row.
-const WIDTH: u32 = 500;
-const DETAIL_WIDTH: u32 = 150;
-/// The gap between the caret and the menu below it.
-const GAP: u32 = 4;
+const FOOTER_HEIGHT: u32 = 26;
+/// How wide the menu is, and how much of it is what the item gives back, at the end of a row.
+const WIDTH: u32 = 560;
+const DETAIL_WIDTH: u32 = 190;
 const FONT_SIZE: u32 = 13;
-/// The side of the badge that says what kind of item a row is.
-const BADGE: u32 = 16;
+/// The space between the parts of a row: the badge, the name and what goes with it.
+const ROW_GAPS: u32 = 5;
 /// The space between the frame of the menu and its rows.
-const PADDING: u32 = 4;
+const PADDING: u32 = 6;
 
 /// The caret of the code area, with the completion menu hanging under it.
 ///
@@ -58,6 +63,9 @@ struct CompletionCaretState {
     context: CaretContext,
     menu: Rc<MenuCell>,
     color: Color,
+    /// How far the wheel has turned the list, in logical pixels, that was not enough for a row yet: a trackpad turns it
+    /// in steps smaller than a row, and the list moves when they add up to one.
+    wheel: Rc<Cell<f32>>,
     /// What makes a build differ from the one before, so the framework builds it again.
     changes: u32,
 }
@@ -68,6 +76,7 @@ impl State<CompletionCaret> for CompletionCaretState {
             context: widget.context,
             menu: widget.menu,
             color: widget.color,
+            wheel: Rc::default(),
             changes: 0,
         }
     }
@@ -79,12 +88,8 @@ impl State<CompletionCaret> for CompletionCaretState {
         self.context.on_repaint(Rc::new(move || {
             let _ = blinking.try_set_state(|state| state.changes += 1);
         }));
-        self.menu.on_change(Rc::new(move || {
-            updater.try_set_state(|state| state.changes += 1);
-            // A key the menu takes never reaches the field, which is what asks for a frame when it
-            // edits: without this the menu would change on screen at the next thing that draws.
-            aimer::events::window::request_animation_frame();
-        }));
+        self.menu
+            .on_change(Popup::redraw_watcher(updater, |state| state.changes += 1));
     }
 
     fn adopt_config_from(&mut self, new: Self) {
@@ -100,23 +105,20 @@ impl State<CompletionCaret> for CompletionCaretState {
         let mut stack = Stack::new().add_child(caret);
         let geometry = this.context.geometry();
         let extent = this.context.visible_extent();
-        if let Some((rows, position, total)) = this.menu.with(|menu| {
-            menu.map(|menu| {
-                (
-                    rows_of(menu, &this.menu, &theme),
-                    menu.selected() + 1,
-                    menu.len(),
-                )
-            })
-        }) {
+        if let Some((rows, position, total)) = this
+            .menu
+            .with(|menu| menu.map(|menu| (rows_of(menu, &theme), menu.selected() + 1, menu.len())))
+        {
             let height = menu_height(rows.len());
-            let (left, top) = place(
-                geometry.x,
-                geometry.y,
-                geometry.height.max(0.0),
-                extent,
-                height as f32,
-            );
+            // Where the menu goes in the field, and from the caret, which is what the field places it by.
+            let anchor = Anchor {
+                x: geometry.x,
+                y: geometry.y,
+                height: geometry.height.max(0.0),
+            };
+            let (field_left, field_top) =
+                Popup::place(anchor, (WIDTH as f32, height as f32), extent);
+            let (left, top) = (field_left - geometry.x, field_top - geometry.y);
             // A press on the menu is the menu's, and not the field's: it would put the caret where the click is. The
             // menu is wider than the caret it hangs from, so the field tells it where it was pressed.
             this.context
@@ -136,6 +138,30 @@ impl State<CompletionCaret> for CompletionCaretState {
                         }
                     }
                 })));
+            // The pointer and the keys move one selection, so the row under the pointer is the selected one, and a move that
+            // is not on a row leaves it where it was. A list that scrolls under a pointer that is still does not select.
+            let cell = Rc::clone(&this.menu);
+            this.context
+                .on_popup_hover(Some(Rc::new(move |_, y| {
+                    let number = row_at(y).and_then(|row| {
+                        cell.with(|menu| {
+                            menu.and_then(|menu| menu.rows().nth(row).map(|row| row.number))
+                        })
+                    });
+                    if let Some(number) = number {
+                        cell.hover(number);
+                    }
+                })));
+            // The wheel scrolls the list, and the code under it stays where it is, even when the list is at its end.
+            let cell = Rc::clone(&this.menu);
+            let pending = Rc::clone(&this.wheel);
+            this.context
+                .on_popup_scroll(Some(Rc::new(move |delta_y| {
+                    let (rows, left) = wheel_rows(pending.get(), delta_y);
+                    pending.set(left);
+                    cell.scroll(rows);
+                    true
+                })));
             stack = stack.add_child(
                 Positioned::new()
                     .left(Dimension::Px(left))
@@ -145,7 +171,10 @@ impl State<CompletionCaret> for CompletionCaretState {
         } else {
             this.context.set_popup(None);
             this.context.on_popup_press(None);
+            this.context.on_popup_hover(None);
+            this.context.on_popup_scroll(None);
             this.context.on_popup_dismiss(None);
+            this.wheel.set(0.0);
         }
         stack
     }
@@ -154,80 +183,31 @@ impl State<CompletionCaret> for CompletionCaretState {
 /// Which row of the window of the menu a press `y` from the top of the menu is on, if it is on one: the padding above
 /// the rows, and the hint under them, are not.
 fn row_at(y: f32) -> Option<usize> {
-    let row = (y - PADDING as f32) / ROW_HEIGHT as f32;
+    let row = (y - PADDING as f32) / ROW_PITCH as f32;
     (row >= 0.0).then(|| row as usize)
+}
+
+/// How tall the rows of the menu are, with `rows` of them, in their padding.
+fn rows_height(rows: usize) -> u32 {
+    rows as u32 * ROW_PITCH + 2 * PADDING
 }
 
 /// How tall the menu is with `rows` rows: the rows in their padding, and the hint under them.
 fn menu_height(rows: usize) -> u32 {
-    rows as u32 * ROW_HEIGHT + 4 * PADDING + FOOTER_HEIGHT + 1
+    rows_height(rows) + FOOTER_HEIGHT + 1
 }
 
-/// Where the menu is, as how far from the caret's left and top edges, for a caret that is at `(x, y)` in its field and
-/// `caret_height` tall, in a field whose text is shown as far as `extent`. It hangs below the caret; where it does not
-/// fit there and there is more room above, it goes above; and where it would go past the right of the field it
-/// moves left, as far as the caret is from the left.
-fn place(
-    x: f32,
-    y: f32,
-    caret_height: f32,
-    extent: Option<(f32, f32)>,
-    menu_height: f32,
-) -> (f32, f32) {
-    let below = (0.0, caret_height + GAP as f32);
-    let Some((right, bottom)) = extent else {
-        return below;
-    };
-    let (room_below, room_above) = (bottom - (y + caret_height + GAP as f32), y - GAP as f32);
-    let top = if menu_height > room_below && room_above > room_below {
-        -(menu_height + GAP as f32)
-    } else {
-        below.1
-    };
-    let overflow = x + WIDTH as f32 - right;
-    (-overflow.max(0.0).min(x.max(0.0)), top)
-}
-
-/// The colors the badges of the kinds of items are in.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Hue {
-    Pink,
-    Green,
-    Purple,
-    Orange,
-    Blue,
-    Amber,
-    Teal,
-    Gray,
-}
-
-impl Hue {
-    /// The color of the glyph and, fainter, of the edge and the fill of the badge.
-    fn color(self) -> Color {
-        match self {
-            Self::Pink => Color::Rgb(240, 100, 178),
-            Self::Green => Color::Rgb(104, 200, 150),
-            Self::Purple => Color::Rgb(150, 124, 244),
-            Self::Orange => Color::Rgb(250, 128, 92),
-            Self::Blue => Color::Rgb(112, 150, 246),
-            Self::Amber => Color::Rgb(238, 168, 72),
-            Self::Teal => Color::Rgb(88, 196, 210),
-            Self::Gray => Color::Rgb(156, 152, 176),
-        }
-    }
-}
-
-/// What a badge says of an item: the glyph in it, its color, and the kind in words for a row that has no detail.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct Glyph {
-    text: &'static str,
-    hue: Hue,
-    name: &'static str,
+/// How many whole rows a turn of the wheel of `delta_y` logical pixels moves the list, down where positive, when `pending`
+/// pixels of the turns before it were not enough for a row, and how much is pending after it. A scroll event tells how far
+/// the content moves, so a delta that is negative is the list going down.
+fn wheel_rows(pending: f32, delta_y: f32) -> (isize, f32) {
+    let total = pending - delta_y;
+    let rows = (total / ROW_PITCH as f32).trunc();
+    (rows as isize, total - rows * ROW_PITCH as f32)
 }
 
 /// The glyph of an item. A macro is told by the server as a function whose name ends in `!`.
 fn glyph_of(item: &Item) -> Glyph {
-    let glyph = |text, hue, name| Glyph { text, hue, name };
     match item.kind {
         ItemKind::Function | ItemKind::Method
             if item.label.ends_with('!')
@@ -236,84 +216,75 @@ fn glyph_of(item: &Item) -> Glyph {
                     .as_deref()
                     .is_some_and(|detail| detail.starts_with("macro")) =>
         {
-            glyph("#", Hue::Orange, "macro")
+            Glyph::new("#", Hue::Orange, "macro")
         }
-        ItemKind::Function => glyph("fn", Hue::Green, "function"),
-        ItemKind::Method => glyph("fn", Hue::Green, "method"),
-        ItemKind::Constructor => glyph("fn", Hue::Green, "constructor"),
-        ItemKind::Field | ItemKind::Property => glyph("p", Hue::Teal, "field"),
-        ItemKind::Variable | ItemKind::Value => glyph("v", Hue::Teal, "variable"),
-        ItemKind::Class | ItemKind::Struct => glyph("S", Hue::Pink, "struct"),
-        ItemKind::Interface => glyph("T", Hue::Purple, "trait"),
-        ItemKind::Module | ItemKind::Folder | ItemKind::File => glyph("M", Hue::Blue, "module"),
-        ItemKind::Enum => glyph("E", Hue::Amber, "enum"),
-        ItemKind::EnumMember => glyph("e", Hue::Amber, "variant"),
-        ItemKind::Constant => glyph("C", Hue::Blue, "constant"),
-        ItemKind::Keyword => glyph("k", Hue::Gray, "keyword"),
-        ItemKind::Snippet => glyph("s", Hue::Gray, "snippet"),
-        ItemKind::TypeParameter => glyph("T", Hue::Purple, "type parameter"),
-        ItemKind::Unit
-        | ItemKind::Event
-        | ItemKind::Operator
-        | ItemKind::Reference
-        | ItemKind::Color
-        | ItemKind::Text
-        | ItemKind::Other => glyph("\u{b7}", Hue::Gray, ""),
+        kind => Glyph::of(kind),
     }
 }
 
-/// What a row shows, owned so that the button of the row can draw it again when the pointer is over it.
+/// What a row shows, owned by the widget of the row.
 struct RowView {
-    number: usize,
     typed: String,
     rest: String,
     glyph: Glyph,
     label_detail: String,
+    /// Whether the row has a badge for its kind: a keyword has none.
+    badge: bool,
+    /// The parameters of a function, in their brackets, which are set after its name.
+    params: String,
+    /// What is set at the end of the row: what a function gives back, or what the server says of any other item.
     detail: String,
     selected: bool,
     deprecated: bool,
 }
 
-/// The rows of the window of the menu, the selected one marked, each of them a button that picks its item.
-fn rows_of(menu: &Menu, cell: &Rc<MenuCell>, theme: &CodeTheme) -> Vec<AnyWidget> {
+/// Whether an item of `kind` has a badge: a keyword is not a symbol of the code, and has none, though its row keeps the room of one.
+fn has_badge(kind: ItemKind) -> bool {
+    !matches!(kind, ItemKind::Keyword)
+}
+
+/// The rows of the window of the menu, the selected one marked. A press on one is the field's to tell, as it is on the
+/// rest of the menu, and so a row is not a button.
+fn rows_of(menu: &Menu, theme: &CodeTheme) -> Vec<AnyWidget> {
     menu.rows()
         .map(|row| {
-            // The word typed is a whole number of characters of the label, which the menu checked.
-            let (typed, rest) = row.item.label.split_at(row.typed);
+            // The word typed is a whole number of characters of the label, which the menu checked, and is not longer than the name that
+            // is shown of it, which may be the label without the colons of a module.
+            let name = Label::name(&row.item.label, row.item.kind);
+            let (typed, rest) = name.split_at(row.typed.min(name.len()));
             let glyph = glyph_of(row.item);
+            let detail = row.item.detail.as_deref().filter(|detail| !detail.is_empty());
+            let signature = detail.and_then(Call::signature);
             let view = RowView {
-                number: row.number,
                 typed: typed.to_owned(),
                 rest: rest.to_owned(),
                 glyph,
                 label_detail: row
                     .item
                     .label_detail
-                    .clone()
-                    .unwrap_or_default(),
-                detail: row
-                    .item
-                    .detail
                     .as_deref()
-                    .filter(|detail| !detail.is_empty())
-                    .unwrap_or(glyph.name)
-                    .to_owned(),
+                    .map(Label::detail)
+                    .unwrap_or_default(),
+                badge: has_badge(row.item.kind),
+                params: signature
+                    .map(|signature| signature.params.to_owned())
+                    .unwrap_or_default(),
+                detail: match signature {
+                    // A function says what it takes beside its name, and what it gives back at the end of the row.
+                    Some(signature) => signature.returns.unwrap_or_default().to_owned(),
+                    None => detail.unwrap_or(glyph.name).to_owned(),
+                },
                 selected: row.selected,
                 deprecated: row.item.deprecated,
             };
-            let (cell, theme) = (Rc::clone(cell), *theme);
-            let number = view.number;
-            Button::new()
-                .no_decor()
-                .on_press(move || cell.pick(number))
-                .build(move |state| row_widget(&view, state.is_hovered, theme))
-                .boxed()
+            row_widget(&view, *theme).boxed()
         })
         .collect()
 }
 
-/// One row of the menu: the kind, the name with the word typed marked, what is said beside it, and the detail.
-fn row_widget(view: &RowView, hovered: bool, theme: CodeTheme) -> impl Widget + use<> {
+/// One row of the menu: the kind, the name with the word typed marked and what it takes, and at the end what it gives back.
+fn row_widget(view: &RowView, theme: CodeTheme) -> impl Widget + use<> {
+    // Names, parameters and what they give back are code, and are set as it is: in the font of the code.
     let code = || {
         TextStyle::new()
             .font_family(fonts::code_family())
@@ -325,51 +296,49 @@ fn row_widget(view: &RowView, hovered: bool, theme: CodeTheme) -> impl Widget + 
     } else {
         theme.text
     };
+    // What goes with the name is dimmer than the name, and is as plain as it on the row that is chosen.
+    let dim = if view.selected { plain.with_alpha(0.8) } else { plain.with_alpha(0.55) };
+    // One look for what is chosen, whether the keys or the pointer chose it: the pink of the app, as softly as the list of usages
+    // marks its row.
     let background = if view.selected {
-        theme.selected
-    } else if hovered {
-        theme.hover
+        theme.marker.with_alpha(Popup::ROW_HIGHLIGHT)
     } else {
         Color::Transparent
     };
     Container::new()
         .width(Dimension::Percent(100.0))
         .height(ROW_HEIGHT)
-        .padding(
-            LayoutSpacing::new()
-                .left(8)
-                .right(12)
-                .top(2)
-                .bottom(2),
-        )
-        .margin(LayoutSpacing::new().bottom(4))
-        .decoration([BorderRadius::all(5).notype(), background.notype()])
+        .padding(LayoutSpacing::new().left(8).right(10))
+        .margin(LayoutSpacing::new().bottom(ROW_GAP))
+        .decoration([BorderRadius::all(4).notype(), background.notype()])
         .child(
             Line::new()
                 .vertical_alignment(BoxAlignment::Center)
-                .gaps(LayoutSpacing::all(8))
+                .gaps(LayoutSpacing::all(ROW_GAPS))
                 .children([
-                    badge(view.glyph).boxed(),
+                    // A keyword has no badge, and keeps the room of one, so that the names of all the rows start at one line.
+                    if view.badge {
+                        Badge::new(view.glyph).boxed()
+                    } else {
+                        SizedBox::new().width(Badge::SIZE).height(Badge::SIZE).boxed()
+                    },
                     Line::new()
                         .children([
+                            // What was typed is the pink of the app, and the whole name is bold.
                             Text::new(view.typed.clone())
-                                .text_style(code().color(theme.accent))
+                                .text_style(code().font_weight(FontWeight::Bold).color(theme.marker))
                                 .boxed(),
                             Text::new(view.rest.clone())
-                                .text_style(code().color(plain))
+                                .text_style(code().font_weight(FontWeight::Bold).color(plain))
                                 .boxed(),
                         ])
                         .boxed(),
-                    // What is said beside the label, such as where the item is imported from, takes the room
-                    // that is left, and is cut with an ellipsis when it does not fit.
+                    // What it takes, and what is said beside the name, such as where it is imported from, take the room that is
+                    // left, and are cut when it does not fit.
                     Expanded::new()
                         .child(
-                            Text::new(view.label_detail.clone()).text_style(
-                                code()
-                                    .font_size(FONT_SIZE - 1)
-                                    .color(theme.muted)
-                                    .text_overflow(TextOverflow::Ellipsis),
-                            ),
+                            Text::new(format!("{}{}", view.params, if view.label_detail.is_empty() { String::new() } else { format!(" {}", view.label_detail) }))
+                                .text_style(code().color(dim).text_overflow(TextOverflow::Clip)),
                         )
                         .boxed(),
                     SizedBox::new()
@@ -377,49 +346,10 @@ fn row_widget(view: &RowView, hovered: bool, theme: CodeTheme) -> impl Widget + 
                         .box_child(
                             Text::new(view.detail.clone())
                                 .text_align(TextAlign::TopRight)
-                                .text_style(
-                                    fonts::ui()
-                                        .font_size(FONT_SIZE - 1)
-                                        .color(theme.muted)
-                                        .text_overflow(TextOverflow::Ellipsis),
-                                ),
+                                .text_style(code().color(dim).text_overflow(TextOverflow::Clip)),
                         )
                         .boxed(),
                 ]),
-        )
-}
-
-/// The small rounded square that tells the kind of an item: a glyph in the color of the kind, on a fainter fill of it, in an
-/// edge of it that is fainter than the glyph.
-fn badge(glyph: Glyph) -> impl Widget {
-    let color = glyph.hue.color();
-
-    Container::new()
-        .width(BADGE)
-        .height(BADGE)
-        .decoration(
-            BoxDecoration::new()
-                .background_color(color.with_alpha(0.08))
-                .border_radius(3)
-                .border(BoxBorder::all(
-                    BorderSlice::new()
-                        .color(color.with_alpha(0.75))
-                        .style(BorderStyle::Solid)
-                        .stroke(1.0),
-                )),
-        )
-        .child(
-            Center::new().box_child(
-                Text::new(glyph.text)
-                    .text_align(TextAlign::MidCenter)
-                    .text_style(
-                        TextStyle::new()
-                            .font_family(fonts::ui_family())
-                            .font_size(if glyph.text.len() > 1 { 10 } else { 12 })
-                            .font_weight(aimer::FontWeight::Bold)
-                            .color(color),
-                    ),
-            ),
         )
 }
 
@@ -427,11 +357,11 @@ fn badge(glyph: Glyph) -> impl Widget {
 fn menu_box(rows: Vec<AnyWidget>, position: usize, total: usize, theme: CodeTheme) -> impl Widget {
     // The height is given and not left to the rows: the caret this hangs from is a line tall, and
     // the room it offers its child is no more than that.
-    let rows_height = rows.len() as u32 * ROW_HEIGHT + 4 * PADDING;
+    let rows_height = rows_height(rows.len());
     Container::new()
         .width(WIDTH)
         .height(menu_height(rows.len()))
-        .decoration(frame(theme))
+        .decoration(Popup::frame(theme))
         .child(
             Column::new()
                 .gaps(LayoutSpacing::new())
@@ -484,105 +414,12 @@ fn footer(position: usize, total: usize, theme: CodeTheme) -> impl Widget {
         )
 }
 
-/// The look of the frame: a dark fill and a line around it, so the menu stands out of the code.
-fn frame(theme: CodeTheme) -> BoxDecoration {
-    let edge = || {
-        BorderSlice::new()
-            .color(theme.divider)
-            .style(BorderStyle::Solid)
-            .stroke(1.0)
-    };
-    BoxDecoration::new()
-        .background_color(theme.bar)
-        .border_radius(8)
-        .border(
-            BoxBorder::new()
-                .top(edge())
-                .bottom(edge())
-                .left(edge())
-                .right(edge()),
-        )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     const ROWS_10: f32 =
-        10.0 * ROW_HEIGHT as f32 + 2.0 * PADDING as f32 + FOOTER_HEIGHT as f32 + 1.0;
-
-    #[test]
-    fn the_menu_hangs_below_the_caret_where_there_is_room_and_where_the_field_is_not_known() {
-        // A caret 20 tall at 100, in a field 800 tall and 1000 wide.
-        assert_eq!(
-            place(50.0, 100.0, 20.0, Some((1000.0, 800.0)), ROWS_10),
-            (0.0, 24.0)
-        );
-        assert_eq!(
-            place(50.0, 700.0, 20.0, None, ROWS_10),
-            (0.0, 24.0),
-            "a field that has not said where it ends"
-        );
-    }
-
-    #[test]
-    fn the_menu_goes_above_the_caret_where_it_does_not_fit_below_and_there_is_more_room_above() {
-        let (left, top) = place(50.0, 700.0, 20.0, Some((1000.0, 780.0)), ROWS_10);
-        assert_eq!(left, 0.0);
-        assert_eq!(top, -(ROWS_10 + 4.0), "its bottom is a gap above the caret");
-        // Neither fits, and there is more room below than above: it stays below.
-        assert_eq!(
-            place(50.0, 40.0, 20.0, Some((1000.0, 200.0)), ROWS_10).1,
-            24.0
-        );
-        // Neither fits, and there is more room above: above.
-        assert_eq!(
-            place(50.0, 180.0, 20.0, Some((1000.0, 200.0)), ROWS_10).1,
-            -(ROWS_10 + 4.0)
-        );
-        // It just fits below: the line is where it was.
-        assert_eq!(
-            place(
-                50.0,
-                100.0,
-                20.0,
-                Some((1000.0, 100.0 + 20.0 + 4.0 + ROWS_10)),
-                ROWS_10
-            )
-            .1,
-            24.0
-        );
-    }
-
-    #[test]
-    fn the_menu_moves_left_where_it_would_go_past_the_right_of_the_field_but_not_past_its_left() {
-        let width = WIDTH as f32;
-        assert_eq!(
-            place(300.0, 100.0, 20.0, Some((300.0 + width, 800.0)), ROWS_10).0,
-            0.0,
-            "it just fits"
-        );
-        assert_eq!(
-            place(
-                300.0,
-                100.0,
-                20.0,
-                Some((300.0 + width - 50.0, 800.0)),
-                ROWS_10
-            )
-            .0,
-            -50.0
-        );
-        assert_eq!(
-            place(30.0, 100.0, 20.0, Some((100.0, 800.0)), ROWS_10).0,
-            -30.0,
-            "no further than the left of the field"
-        );
-        assert_eq!(
-            place(0.0, 100.0, 20.0, Some((100.0, 800.0)), ROWS_10).0,
-            0.0
-        );
-    }
+        10.0 * ROW_PITCH as f32 + 2.0 * PADDING as f32 + FOOTER_HEIGHT as f32 + 1.0;
 
     fn item_of(kind: ItemKind, label: &str, detail: Option<&str>) -> Item {
         use crate::lsp::Edit;
@@ -600,6 +437,14 @@ mod tests {
             },
             resolve: None,
             deprecated: false,
+        }
+    }
+
+    #[test]
+    fn a_keyword_has_no_badge_and_every_other_kind_has() {
+        assert!(!has_badge(ItemKind::Keyword));
+        for kind in [ItemKind::Function, ItemKind::Method, ItemKind::Struct, ItemKind::Variable, ItemKind::Field, ItemKind::Module, ItemKind::Constant] {
+            assert!(has_badge(kind), "{kind:?}");
         }
     }
 
@@ -688,7 +533,7 @@ mod tests {
 
     #[test]
     fn a_press_is_on_the_row_it_is_in_and_on_none_in_the_padding_above_them() {
-        let (padding, row) = (PADDING as f32, ROW_HEIGHT as f32);
+        let (padding, row) = (PADDING as f32, ROW_PITCH as f32);
         assert_eq!(row_at(-1.0), None);
         assert_eq!(
             row_at(padding - 0.5),
@@ -704,9 +549,35 @@ mod tests {
     }
 
     #[test]
+    fn the_rows_are_as_far_apart_as_they_are_drawn() {
+        // The row is its height and the gap under it: a pointer on the last row of a full window is on the last row, and
+        // the window is as tall as all of them.
+        assert_eq!(ROW_PITCH, ROW_HEIGHT + ROW_GAP);
+        let last = PADDING as f32 + (Menu::WINDOW - 1) as f32 * ROW_PITCH as f32;
+        assert_eq!(row_at(last + 1.0), Some(Menu::WINDOW - 1));
+        assert!(last + ROW_HEIGHT as f32 <= (menu_height(Menu::WINDOW) - FOOTER_HEIGHT) as f32);
+    }
+
+    #[test]
+    fn the_wheel_moves_the_rows_a_whole_row_at_a_time_and_keeps_what_is_left_for_the_next_turn() {
+        let pitch = ROW_PITCH as f32;
+        // Content moves up, which is the list going down, when the delta is negative.
+        assert_eq!(wheel_rows(0.0, -pitch), (1, 0.0));
+        assert_eq!(wheel_rows(0.0, pitch * 2.0), (-2, 0.0));
+        let (rows, left) = wheel_rows(0.0, -pitch * 0.4);
+        assert_eq!(rows, 0);
+        assert!((left - pitch * 0.4).abs() < 1e-4, "{left}");
+        let (rows, left) = wheel_rows(left, -pitch * 0.7);
+        assert_eq!(rows, 1, "two small turns are a row");
+        assert!((left - pitch * 0.1).abs() < 1e-4, "{left}");
+        let (rows, _) = wheel_rows(pitch * 0.9, pitch * 0.2);
+        assert_eq!(rows, 0, "turning back first takes what was kept");
+    }
+
+    #[test]
     fn the_height_of_a_menu_is_its_rows_and_its_hint() {
         assert_eq!(menu_height(0), 2 * PADDING + FOOTER_HEIGHT + 1);
         assert_eq!(menu_height(10) as f32, ROWS_10);
-        assert_eq!(menu_height(3) - menu_height(2), ROW_HEIGHT);
+        assert_eq!(menu_height(3) - menu_height(2), ROW_PITCH);
     }
 }

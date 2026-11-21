@@ -28,6 +28,8 @@ pub struct Tab {
     name: String,
     path: PathBuf,
     active: bool,
+    /// Whether the tab is the settings and not a file: it has a gear for an icon and no changes to show.
+    settings: bool,
 }
 
 impl Tab {
@@ -37,6 +39,18 @@ impl Tab {
             name: name.into(),
             path,
             active,
+            settings: false,
+        }
+    }
+
+    /// The tab of the settings, which is not a file: it has no path, and nothing in it changes.
+    pub fn settings(active: bool) -> Self {
+        Self {
+            id: Workspace::SETTINGS_TAB,
+            name: "Settings".to_string(),
+            path: PathBuf::new(),
+            active,
+            settings: true,
         }
     }
 }
@@ -62,30 +76,28 @@ impl StatelessWidget for Tab {
         };
         let letter = change.and_then(Change::letter);
         let label = name.clone();
+        let settings = self.settings;
         // The name and the cross are two buttons side by side, and not one inside the other: a press
         // belongs to the innermost, and the outer one would be the only one to see it.
         let name_button = Button::new()
             .no_decor()
             .on_press(move || show.update(|space| space.activate(id)))
             .build(move |_| {
+                let leading: aimer::AnyWidget = if settings {
+                    icon(Icons::SETTINGS, 15, color).notype()
+                } else {
+                    material(file_icon(&label), 16).notype()
+                };
                 let mut parts = vec![
-                    material(file_icon(&label), 16).boxed(),
+                    leading.boxed(),
                     Text::new(label.clone())
-                        .text_style(
-                            fonts::ui()
-                                .font_size(13)
-                                .color(color),
-                        )
+                        .text_style(fonts::ui().font_size(13).color(color))
                         .boxed(),
                 ];
                 if let Some(letter) = letter {
                     parts.push(
                         Text::new(letter)
-                            .text_style(
-                                fonts::ui()
-                                    .font_size(12)
-                                    .color(color),
-                            )
+                            .text_style(fonts::ui().font_size(12).color(color))
                             .boxed(),
                     );
                 }
@@ -135,8 +147,11 @@ impl StatelessWidget for Tab {
             });
         // The tab being edited has a line along its top, which is the border of its own box: a
         // widget of a percentage width would be as wide as the whole row of tabs.
-        let mut look =
-            BoxDecoration::new().background_color(if active { theme.marker.blend(theme.bar, 0.9) } else { theme.bar });
+        let mut look = BoxDecoration::new().background_color(if active {
+            theme.marker.blend(theme.bar, 0.9)
+        } else {
+            theme.bar
+        });
         if active {
             look = look.border(
                 BoxBorder::new().bottom(
@@ -147,18 +162,16 @@ impl StatelessWidget for Tab {
                 ),
             );
         }
-        let body = SizedBox::new()
-            .height(HEIGHT)
-            .box_child(
-                Container::new()
-                    .padding(LayoutSpacing::new().bottom(if active { 0 } else { 2 }))
-                    .box_decoration(look)
-                    .child(
-                        Row::new()
-                            .vertical_alignment(BoxAlignment::Center)
-                            .children([name_button.boxed(), close_button.boxed()]),
-                    ),
-            );
+        let body = SizedBox::new().height(HEIGHT).box_child(
+            Container::new()
+                .padding(LayoutSpacing::new().bottom(if active { 0 } else { 2 }))
+                .box_decoration(look)
+                .child(
+                    Row::new()
+                        .vertical_alignment(BoxAlignment::Center)
+                        .children([name_button.boxed(), close_button.boxed()]),
+                ),
+        );
         SizedBox::new()
             .height(HEIGHT)
             .box_child(Row::new().children([body.boxed(), rule::vertical(theme.divider).boxed()]))

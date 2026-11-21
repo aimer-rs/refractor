@@ -4,12 +4,12 @@ use crate::theme::CodeTheme;
 use crate::workspace::Workspace;
 use aimer::style::Theme;
 use aimer::{
-    BuildContext, Column, Container, Dimension, ProviderContext, Row, Scrollable, SizedBox,
-    StatelessWidget, Widget,
+    BuildContext, Column, Container, Dimension, ProviderContext, Row, ScrollBehavior, Scrollable,
+    SizedBox, StatelessWidget, Widget,
 };
 use std::path::PathBuf;
 
-/// The open files, side by side along the top of the editor, and a line under them.
+/// The open files, and the settings if they are open, side by side along the top of the editor, and a line under them.
 ///
 /// Only which files are open, and which is shown, are watched here: a tab watches its own changes.
 #[derive(Clone, StatelessWidget)]
@@ -32,26 +32,33 @@ impl StatelessWidget for TabBar {
                 })
                 .collect()
         });
+        // The settings are the last tab, when they are open: `Some` of whether they are shown.
+        let settings = ctx.select::<Workspace, Option<bool>>(|space| {
+            space
+                .settings_open
+                .then(|| space.settings_active())
+        });
         // A scrollable takes all the height it is given, so it is given the height of a tab.
         let row = SizedBox::new()
             .width(Dimension::Percent(100.0))
             .height(HEIGHT)
             .box_child(
-                Container::new()
-                    .color(theme.bar)
-                    .child(
-                        Scrollable::new()
-                            .horizontal_scroll_bar(None)
-                            .child(
-                                Row::new().children(
-                                    tabs.into_iter()
-                                        .map(|(id, name, path, active)| {
-                                            Tab::new(id, name, path, active).boxed()
-                                        })
-                                        .collect::<Vec<_>>(),
-                                ),
+                Container::new().color(theme.bar).child(
+                    Scrollable::new()
+                        .axis(aimer::ScrollAxis::Horizontal)
+                        .horizontal_scroll_bar(None)
+                        .scroll_behavior(ScrollBehavior::no_bounce())
+                        .child(
+                            Row::new().children(
+                                tabs.into_iter()
+                                    .map(|(id, name, path, active)| {
+                                        Tab::new(id, name, path, active).boxed()
+                                    })
+                                    .chain(settings.map(|active| Tab::settings(active).boxed()))
+                                    .collect::<Vec<_>>(),
                             ),
-                    ),
+                        ),
+                ),
             );
         Column::new().children([row.boxed(), rule::horizontal(theme.divider).boxed()])
     }

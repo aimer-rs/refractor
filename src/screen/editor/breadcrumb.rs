@@ -118,7 +118,7 @@ impl State<Breadcrumb> for BreadcrumbState {
 
         Container::new()
             .height(Breadcrumb::HEIGHT)
-            .padding(pad(4, 14, 0, 14))
+            .padding(pad(4, 14, 4, 14))
             .child(
                 Row::new()
                     .vertical_alignment(BoxAlignment::Center)

@@ -2,15 +2,15 @@
 //! a check when it has nothing to say against it, the count of its errors and the count of its warnings, and a
 //! spinner while the server is still starting or working.
 
+use super::spinner::Spinner;
 use crate::components::icon::icon_stroked;
 use crate::components::pad::pad;
 use crate::fonts;
-use super::spinner::Spinner;
 use crate::lsp::{Status, Summary};
 use crate::theme::CodeTheme;
 use crate::workspace::Workspace;
-use aimer::decoration::Decoration;
 use aimer::console::cursor::{CursorIcon, set_cursor};
+use aimer::decoration::Decoration;
 use aimer::input::button::Button;
 use aimer::input::mouse_region::MouseRegion;
 use aimer::style::{BorderRadius, FontWeight, LayoutSpacing, Theme};
@@ -49,10 +49,16 @@ fn look_of(summary: &Summary) -> Option<Look> {
         Status::Stopped => return None,
         Status::Failed(_) => (State::Failed, 0, 0),
         Status::Starting => (State::Busy, 0, 0),
-        Status::Ready if summary.progress.is_some() => (State::Busy, summary.errors, summary.warnings),
+        Status::Ready if summary.progress.is_some() => {
+            (State::Busy, summary.errors, summary.warnings)
+        }
         Status::Ready => (State::Ready, summary.errors, summary.warnings),
     };
-    Some(Look { state, errors, warnings })
+    Some(Look {
+        state,
+        errors,
+        warnings,
+    })
 }
 
 /// A part of the mark, from left to right.
@@ -69,7 +75,9 @@ impl Segment {
     /// How wide it is: its icon, and for a count the digits after it.
     fn width(self) -> u32 {
         match self {
-            Self::Errors(count) | Self::Warnings(count) => ICON + COUNT_GAP + DIGIT * count.to_string().len() as u32,
+            Self::Errors(count) | Self::Warnings(count) => {
+                ICON + COUNT_GAP + DIGIT * count.to_string().len() as u32
+            }
             _ => ICON,
         }
     }
@@ -124,7 +132,15 @@ pub const RIGHT: u32 = 10;
 fn width_of(segments: &[Segment]) -> u32 {
     match segments {
         [single] if single.width() == ICON => SIZE,
-        _ => PAD_BEFORE + segments.iter().map(|segment| segment.width()).sum::<u32>() + PART_GAP * segments.len().saturating_sub(1) as u32 + PAD_AFTER,
+        _ => {
+            PAD_BEFORE
+                + segments
+                    .iter()
+                    .map(|segment| segment.width())
+                    .sum::<u32>()
+                + PART_GAP * segments.len().saturating_sub(1) as u32
+                + PAD_AFTER
+        }
     }
 }
 
@@ -138,7 +154,12 @@ thread_local! {
 /// `pane_width` wide, or nothing where there is no mark.
 pub fn covered(pane_width: f32) -> Vec<(f32, f32, f32, f32)> {
     match WIDTH.get() {
-        Some(width) => vec![(pane_width - RIGHT as f32 - width as f32, TOP as f32, width as f32, SIZE as f32)],
+        Some(width) => vec![(
+            pane_width - RIGHT as f32 - width as f32,
+            TOP as f32,
+            width as f32,
+            SIZE as f32,
+        )],
         None => Vec::new(),
     }
 }
@@ -153,7 +174,9 @@ impl StatelessWidget for LspBadge {
     fn build(&self, ctx: &BuildContext) -> impl Widget {
         let theme = *CodeTheme::of(ctx);
         let store = ProviderHandle::<Workspace>::of(ctx);
-        let look = ctx.select::<Workspace, Option<Look>>(|space| space.lsp_summary().as_ref().and_then(look_of));
+        let look = ctx.select::<Workspace, Option<Look>>(|space| {
+            space.lsp_summary().as_ref().and_then(look_of)
+        });
         let Some(look) = look else {
             WIDTH.set(None);
             return ZeroSizedBox.notype();
@@ -178,10 +201,15 @@ impl StatelessWidget for LspBadge {
 /// The color of the mark: that of the worst of what it says.
 fn color_of(look: &Look, theme: &CodeTheme) -> aimer::Color {
     match look {
-        Look { state: State::Failed, .. } => theme.warning,
+        Look {
+            state: State::Failed,
+            ..
+        } => theme.warning,
         Look { errors, .. } if *errors > 0 => theme.warning,
         Look { warnings, .. } if *warnings > 0 => theme.caution,
-        Look { state: State::Busy, .. } => theme.muted,
+        Look {
+            state: State::Busy, ..
+        } => theme.muted,
         Look { .. } => theme.success,
     }
 }
@@ -191,19 +219,40 @@ fn mark(look: Look, theme: &CodeTheme, hovered: bool) -> AnyWidget {
     let color = color_of(&look, theme);
     let segments = segments_of(&look);
     let width = width_of(&segments);
-    let fill = [BorderRadius::all(7).notype(), color.with_alpha(if hovered { FILL_HOVERED } else { FILL }).notype()];
-    let parts: Vec<AnyWidget> = segments.iter().map(|segment| part(*segment, theme)).collect();
+    let fill = [
+        BorderRadius::all(7).notype(),
+        color
+            .with_alpha(if hovered { FILL_HOVERED } else { FILL })
+            .notype(),
+    ];
+    let parts: Vec<AnyWidget> = segments
+        .iter()
+        .map(|segment| part(*segment, theme))
+        .collect();
     let inside: AnyWidget = if parts.len() == 1 && width == SIZE {
-        Container::new().padding(pad(INSET, INSET, INSET, INSET)).decoration(fill).child(parts.into_iter().next().expect("one part")).notype()
+        Container::new()
+            .padding(pad(INSET, INSET, INSET, INSET))
+            .decoration(fill)
+            .child(parts.into_iter().next().expect("one part"))
+            .notype()
     } else {
         Container::new()
             .padding(pad(INSET, PAD_AFTER - 3, INSET, PAD_BEFORE))
             .decoration(fill)
-            .child(Row::new().vertical_alignment(BoxAlignment::Center).gaps(LayoutSpacing::all(PART_GAP)).children(parts))
+            .child(
+                Row::new()
+                    .vertical_alignment(BoxAlignment::Center)
+                    .gaps(LayoutSpacing::all(PART_GAP))
+                    .children(parts),
+            )
             .notype()
     };
     // The box is what keeps the mark its size: a container fills what it is given.
-    SizedBox::new().width(width).height(SIZE).box_child(inside).notype()
+    SizedBox::new()
+        .width(width)
+        .height(SIZE)
+        .box_child(inside)
+        .notype()
 }
 
 /// One part of the mark.
@@ -215,7 +264,12 @@ fn part(segment: Segment, theme: &CodeTheme) -> AnyWidget {
             .children([
                 icon_stroked(glyph, ICON, color, 2.0).boxed(),
                 Text::new(count.to_string())
-                    .text_style(fonts::ui().font_size(13).font_weight(FontWeight::Bold).color(color))
+                    .text_style(
+                        fonts::ui()
+                            .font_size(13)
+                            .font_weight(FontWeight::Bold)
+                            .color(color),
+                    )
                     .boxed(),
             ])
             .notype()
@@ -233,41 +287,94 @@ fn part(segment: Segment, theme: &CodeTheme) -> AnyWidget {
 mod tests {
     use super::*;
 
-    fn summary(status: Option<Status>, progress: Option<&str>, errors: usize, warnings: usize) -> Summary {
-        Summary { status, progress: progress.map(str::to_owned), errors, warnings }
+    fn summary(
+        status: Option<Status>,
+        progress: Option<&str>,
+        errors: usize,
+        warnings: usize,
+    ) -> Summary {
+        Summary {
+            status,
+            progress: progress.map(str::to_owned),
+            errors,
+            warnings,
+        }
     }
 
-    fn look(status: Option<Status>, progress: Option<&str>, errors: usize, warnings: usize) -> Option<Look> {
+    fn look(
+        status: Option<Status>,
+        progress: Option<&str>,
+        errors: usize,
+        warnings: usize,
+    ) -> Option<Look> {
         look_of(&summary(status, progress, errors, warnings))
     }
 
     fn of(state: State, errors: usize, warnings: usize) -> Option<Look> {
-        Some(Look { state, errors, warnings })
+        Some(Look {
+            state,
+            errors,
+            warnings,
+        })
     }
 
     #[test]
     fn a_file_the_server_has_nothing_against_is_ready_and_has_no_counts() {
-        assert_eq!(look(Some(Status::Ready), None, 0, 0), of(State::Ready, 0, 0));
+        assert_eq!(
+            look(Some(Status::Ready), None, 0, 0),
+            of(State::Ready, 0, 0)
+        );
     }
 
     #[test]
     fn the_errors_and_the_warnings_are_both_counted() {
-        assert_eq!(look(Some(Status::Ready), None, 3, 0), of(State::Ready, 3, 0));
-        assert_eq!(look(Some(Status::Ready), None, 0, 2), of(State::Ready, 0, 2));
-        assert_eq!(look(Some(Status::Ready), None, 1, 9), of(State::Ready, 1, 9), "the warnings do not wait for the errors to be mended");
+        assert_eq!(
+            look(Some(Status::Ready), None, 3, 0),
+            of(State::Ready, 3, 0)
+        );
+        assert_eq!(
+            look(Some(Status::Ready), None, 0, 2),
+            of(State::Ready, 0, 2)
+        );
+        assert_eq!(
+            look(Some(Status::Ready), None, 1, 9),
+            of(State::Ready, 1, 9),
+            "the warnings do not wait for the errors to be mended"
+        );
     }
 
     #[test]
     fn a_server_that_is_starting_or_working_is_busy_and_still_says_what_it_has_found() {
-        assert_eq!(look(Some(Status::Starting), None, 0, 0), of(State::Busy, 0, 0));
-        assert_eq!(look(Some(Status::Ready), Some("Indexing 40%"), 0, 0), of(State::Busy, 0, 0));
-        assert_eq!(look(Some(Status::Ready), Some("Working"), 2, 1), of(State::Busy, 2, 1), "an error is not hidden by a spinner");
+        assert_eq!(
+            look(Some(Status::Starting), None, 0, 0),
+            of(State::Busy, 0, 0)
+        );
+        assert_eq!(
+            look(Some(Status::Ready), Some("Indexing 40%"), 0, 0),
+            of(State::Busy, 0, 0)
+        );
+        assert_eq!(
+            look(Some(Status::Ready), Some("Working"), 2, 1),
+            of(State::Busy, 2, 1),
+            "an error is not hidden by a spinner"
+        );
     }
 
     #[test]
     fn a_server_that_failed_is_a_failure_whatever_it_had_found() {
-        assert_eq!(look(Some(Status::Failed("it exited".into())), None, 0, 0), of(State::Failed, 0, 0));
-        assert_eq!(look(Some(Status::Failed("it exited".into())), Some("Working"), 4, 4), of(State::Failed, 0, 0));
+        assert_eq!(
+            look(Some(Status::Failed("it exited".into())), None, 0, 0),
+            of(State::Failed, 0, 0)
+        );
+        assert_eq!(
+            look(
+                Some(Status::Failed("it exited".into())),
+                Some("Working"),
+                4,
+                4
+            ),
+            of(State::Failed, 0, 0)
+        );
     }
 
     #[test]
@@ -277,18 +384,38 @@ mod tests {
     }
 
     fn segments(state: State, errors: usize, warnings: usize) -> Vec<Segment> {
-        segments_of(&Look { state, errors, warnings })
+        segments_of(&Look {
+            state,
+            errors,
+            warnings,
+        })
     }
 
     #[test]
-    fn the_mark_is_made_of_the_spinner_while_busy_then_the_errors_then_the_warnings_and_a_check_where_there_is_nothing() {
+    fn the_mark_is_made_of_the_spinner_while_busy_then_the_errors_then_the_warnings_and_a_check_where_there_is_nothing()
+     {
         assert_eq!(segments(State::Ready, 0, 0), [Segment::Check]);
-        assert_eq!(segments(State::Busy, 0, 0), [Segment::Spinner], "and not a check while it works");
+        assert_eq!(
+            segments(State::Busy, 0, 0),
+            [Segment::Spinner],
+            "and not a check while it works"
+        );
         assert_eq!(segments(State::Ready, 2, 0), [Segment::Errors(2)]);
         assert_eq!(segments(State::Ready, 0, 5), [Segment::Warnings(5)]);
-        assert_eq!(segments(State::Ready, 2, 5), [Segment::Errors(2), Segment::Warnings(5)], "errors come first");
-        assert_eq!(segments(State::Busy, 1, 1), [Segment::Spinner, Segment::Errors(1), Segment::Warnings(1)]);
-        assert_eq!(segments(State::Failed, 3, 3), [Segment::Failed], "a server that failed has found nothing to count");
+        assert_eq!(
+            segments(State::Ready, 2, 5),
+            [Segment::Errors(2), Segment::Warnings(5)],
+            "errors come first"
+        );
+        assert_eq!(
+            segments(State::Busy, 1, 1),
+            [Segment::Spinner, Segment::Errors(1), Segment::Warnings(1)]
+        );
+        assert_eq!(
+            segments(State::Failed, 3, 3),
+            [Segment::Failed],
+            "a server that failed has found nothing to count"
+        );
     }
 
     #[test]
@@ -298,17 +425,36 @@ mod tests {
         let one = width_of(&[Segment::Errors(3)]);
         assert_eq!(one, PAD_BEFORE + ICON + COUNT_GAP + DIGIT + PAD_AFTER);
         let both = width_of(&[Segment::Errors(3), Segment::Warnings(12)]);
-        assert_eq!(both, PAD_BEFORE + (ICON + COUNT_GAP + DIGIT) + PART_GAP + (ICON + COUNT_GAP + 2 * DIGIT) + PAD_AFTER);
-        assert!(width_of(&[Segment::Errors(100)]) > one, "more digits are wider");
-        assert!(width_of(&[Segment::Spinner, Segment::Errors(1)]) > width_of(&[Segment::Errors(1)]));
+        assert_eq!(
+            both,
+            PAD_BEFORE
+                + (ICON + COUNT_GAP + DIGIT)
+                + PART_GAP
+                + (ICON + COUNT_GAP + 2 * DIGIT)
+                + PAD_AFTER
+        );
+        assert!(
+            width_of(&[Segment::Errors(100)]) > one,
+            "more digits are wider"
+        );
+        assert!(
+            width_of(&[Segment::Spinner, Segment::Errors(1)]) > width_of(&[Segment::Errors(1)])
+        );
     }
 
     #[test]
     fn the_icon_has_the_same_room_on_every_side_of_the_square_it_is_in() {
         // The square is the icon and its room: whatever the two are made, nothing of the icon is outside the square, and it
         // is in the middle of it.
-        assert!(SIZE >= ICON, "a {ICON} icon does not fit in a {SIZE} square");
-        assert_eq!(SIZE - ICON, 2 * INSET, "{SIZE} is {ICON} and two rooms of {INSET}: one side would have more than the other");
+        assert!(
+            SIZE >= ICON,
+            "a {ICON} icon does not fit in a {SIZE} square"
+        );
+        assert_eq!(
+            SIZE - ICON,
+            2 * INSET,
+            "{SIZE} is {ICON} and two rooms of {INSET}: one side would have more than the other"
+        );
         assert_eq!(INSET, (SIZE - ICON) / 2);
         // The room is the same above and below the icons of a pill, which is as tall as the square.
         assert_eq!(SIZE, INSET + ICON + INSET);
@@ -318,10 +464,26 @@ mod tests {
     fn the_part_of_the_pane_the_mark_covers_is_at_its_top_right_corner_and_as_wide_as_the_mark() {
         let width = width_of(&[Segment::Errors(2), Segment::Warnings(3)]);
         WIDTH.set(Some(width));
-        assert_eq!(covered(800.0), vec![(800.0 - RIGHT as f32 - width as f32, TOP as f32, width as f32, SIZE as f32)]);
+        assert_eq!(
+            covered(800.0),
+            vec![(
+                800.0 - RIGHT as f32 - width as f32,
+                TOP as f32,
+                width as f32,
+                SIZE as f32
+            )]
+        );
         // The same mark is further left in a narrower pane, and a square when it is a check.
         WIDTH.set(Some(SIZE));
-        assert_eq!(covered(300.0), vec![(300.0 - RIGHT as f32 - SIZE as f32, TOP as f32, SIZE as f32, SIZE as f32)]);
+        assert_eq!(
+            covered(300.0),
+            vec![(
+                300.0 - RIGHT as f32 - SIZE as f32,
+                TOP as f32,
+                SIZE as f32,
+                SIZE as f32
+            )]
+        );
         // No mark, no part.
         WIDTH.set(None);
         assert!(covered(800.0).is_empty());
@@ -330,12 +492,29 @@ mod tests {
     #[test]
     fn the_color_of_the_mark_is_that_of_the_worst_of_what_it_says() {
         let theme = CodeTheme::dark();
-        let color = |state, errors, warnings| color_of(&Look { state, errors, warnings }, &theme);
-        assert_eq!(color(State::Ready, 1, 1), theme.warning, "errors over warnings");
+        let color = |state, errors, warnings| {
+            color_of(
+                &Look {
+                    state,
+                    errors,
+                    warnings,
+                },
+                &theme,
+            )
+        };
+        assert_eq!(
+            color(State::Ready, 1, 1),
+            theme.warning,
+            "errors over warnings"
+        );
         assert_eq!(color(State::Ready, 0, 1), theme.caution);
         assert_eq!(color(State::Busy, 0, 0), theme.muted);
         assert_eq!(color(State::Ready, 0, 0), theme.success);
         assert_eq!(color(State::Failed, 0, 0), theme.warning);
-        assert_eq!(color(State::Busy, 0, 2), theme.caution, "what is found is the color while the server works");
+        assert_eq!(
+            color(State::Busy, 0, 2),
+            theme.caution,
+            "what is found is the color while the server works"
+        );
     }
 }

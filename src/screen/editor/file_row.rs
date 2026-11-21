@@ -106,9 +106,7 @@ impl StatelessWidget for FileRow {
                     )
                     .notype()
                 } else {
-                    SizedBox::new()
-                        .width(14)
-                        .notype()
+                    SizedBox::new().width(14).notype()
                 };
                 let kind = material(
                     if row.is_dir {
@@ -122,16 +120,10 @@ impl StatelessWidget for FileRow {
                 let mark: aimer::AnyWidget =
                     match (change.and_then(Change::letter), row.is_dir && inside) {
                         (Some(letter), _) => Text::new(letter)
-                            .text_style(
-                                fonts::ui()
-                                    .font_size(12)
-                                    .color(name_color),
-                            )
+                            .text_style(fonts::ui().font_size(12).color(name_color))
                             .notype(),
                         (None, true) => crate::components::dot::dot(6, theme.accent).notype(),
-                        (None, false) => SizedBox::new()
-                            .width(1)
-                            .notype(),
+                        (None, false) => SizedBox::new().width(1).notype(),
                     };
                 SizedBox::new()
                     .width(Dimension::Percent(100.0))

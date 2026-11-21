@@ -5,12 +5,13 @@ use super::problems_panel::{PANEL_HEIGHT, PANEL_MAX, PANEL_MIN, ProblemsPanel};
 use super::tab_bar::TabBar;
 use crate::document::Document;
 use crate::fonts;
+use crate::screen::settings::SettingsPage;
 use crate::theme::CodeTheme;
 use crate::workspace::Workspace;
 use aimer::style::{LayoutSpacing, TextAlign, Theme};
 use aimer::{
     AnyWidget, BuildContext, Column, Container, Dimension, Direction, Expanded, Positioned,
-    ProviderContext, Resizable, SizedBox, Stack, StatelessWidget, Text, Widget,
+    ProviderContext, ProviderHandle, Resizable, SizedBox, Stack, StatelessWidget, Text, Widget,
 };
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -33,9 +34,22 @@ impl StatelessWidget for EditorArea {
                 .active_document()
                 .map(|document| (Rc::clone(document), space.relative(&document.path)))
         });
-        let problems_open = ctx.select::<Workspace, bool>(|space| space.problems_open);
+        let settings = ctx.select::<Workspace, bool>(|space| space.settings_active());
+        // The panel of problems is of a file, so it is not shown under the settings.
+        let problems_open = ctx.select::<Workspace, bool>(|space| space.problems_open) && !settings;
+        // The tab that is shown, which is how a file that was left is known: it loses the focus, as the settings may say it is saved for.
+        {
+            let space = ProviderHandle::<Workspace>::of(ctx);
+            let (auto_save, documents) = {
+                let space = space.read();
+                (space.auto_save(), space.documents.clone())
+            };
+            let shown_tab = if settings { Some(Workspace::SETTINGS_TAB) } else { shown.as_ref().map(|(document, _)| document.id) };
+            auto_save.switched(shown_tab, documents);
+        }
         let mut column = vec![TabBar.boxed()];
         let body: AnyWidget = match shown {
+            _ if settings => SettingsPage.notype(),
             Some((document, path)) => {
                 column.push(Breadcrumb::new(Rc::clone(&document), path).boxed());
                 // The mark floats over the corner of the text and takes no room from it.
@@ -58,19 +72,11 @@ impl StatelessWidget for EditorArea {
                         .child(
                             Text::new("Open a file from the sidebar")
                                 .text_align(TextAlign::MidCenter)
-                                .text_style(
-                                    fonts::ui()
-                                        .font_size(14)
-                                        .color(theme.muted),
-                                ),
+                                .text_style(fonts::ui().font_size(14).color(theme.muted)),
                         ),
-                )
+                ),
         };
-        column.push(
-            Expanded::new()
-                .child(body)
-                .boxed(),
-        );
+        column.push(Expanded::new().child(body).boxed());
         if problems_open {
             // The third panel, under the editor, whose top edge is dragged to make it taller or shorter.
             column.push(

@@ -73,9 +73,7 @@ impl StatelessWidget for SidePanel {
                             .vertical_alignment(BoxAlignment::Center)
                             .gaps(LayoutSpacing::all(2))
                             .children([
-                                Expanded::new()
-                                    .child(ZeroSizedBox)
-                                    .boxed(),
+                                Expanded::new().child(ZeroSizedBox).boxed(),
                                 tool(Icons::REFRESH_CW, theme, move || {
                                     reload.update(|space| space.refresh());
                                     refresh_status(&reload);
@@ -88,16 +86,9 @@ impl StatelessWidget for SidePanel {
                             ]),
                     ),
             );
-        Container::new()
-            .color(theme.sidebar)
-            .child(
-                Column::new().children([
-                    header.boxed(),
-                    Expanded::new()
-                        .child(FileTree)
-                        .boxed(),
-                ]),
-            )
+        Container::new().color(theme.sidebar).child(
+            Column::new().children([header.boxed(), Expanded::new().child(FileTree).boxed()]),
+        )
     }
 }
 

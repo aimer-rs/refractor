@@ -3,6 +3,7 @@ use crate::components::pad::pad;
 use crate::components::rule;
 use crate::document::Document;
 use crate::fonts;
+use crate::settings::Settings;
 use crate::theme::CodeTheme;
 use crate::workspace::Workspace;
 use aimer::input::ControllerListener;
@@ -34,10 +35,9 @@ impl StatelessWidget for StatusBar {
                 .map(|branch| (branch, space.git_dirty()))
         });
         let message = ctx.select::<Workspace, Option<String>>(|space| space.message.clone());
-        let server = ctx.select::<Workspace, Option<crate::lsp::Summary>>(|space| space.lsp_summary());
-        let small = fonts::ui()
-            .font_size(12)
-            .color(theme.muted);
+        let server =
+            ctx.select::<Workspace, Option<crate::lsp::Summary>>(|space| space.lsp_summary());
+        let small = fonts::ui().font_size(12).color(theme.muted);
 
         let mut left = Vec::new();
         if let Some((name, dirty)) = branch {
@@ -78,9 +78,7 @@ impl StatelessWidget for StatusBar {
         }
         let right: aimer::AnyWidget = match document {
             Some(document) => CaretStatus::new(document).notype(),
-            None => SizedBox::new()
-                .width(1)
-                .notype(),
+            None => SizedBox::new().width(1).notype(),
         };
         Column::new().children([
             rule::horizontal(theme.divider).boxed(),
@@ -141,10 +139,7 @@ struct CaretStatusState {
 
 impl State<CaretStatus> for CaretStatusState {
     fn create(widget: CaretStatus) -> Self {
-        let position = widget
-            .document
-            .controller
-            .cursor_position();
+        let position = widget.document.controller.cursor_position();
         Self {
             document: widget.document,
             position,
@@ -154,30 +149,23 @@ impl State<CaretStatus> for CaretStatusState {
 
     fn on_mount(&mut self, updater: StateUpdater<Self>) {
         let document = Rc::clone(&self.document);
-        self.listener = Some(
-            self.document
-                .controller
-                .listen(move |_| {
-                    let position = document
-                        .controller
-                        .cursor_position();
-                    // The line is rebuilt when the position changes, not for each change of the text.
-                    updater.try_set_state(move |state| {
-                        if state.position != position {
-                            state.position = position;
-                        }
-                    });
-                }),
-        );
+        self.listener = Some(self.document.controller.listen(move |_| {
+            let position = document.controller.cursor_position();
+            // The line is rebuilt when the position changes, not for each change of the text.
+            updater.try_set_state(move |state| {
+                if state.position != position {
+                    state.position = position;
+                }
+            });
+        }));
     }
 
     fn adopt_config_from(&mut self, _new: Self) {}
 
     fn build(this: StateView<Self>, ctx: &BuildContext) -> impl Widget {
         let theme = *CodeTheme::of(ctx);
-        let small = fonts::ui()
-            .font_size(12)
-            .color(theme.muted);
+        let small = fonts::ui().font_size(12).color(theme.muted);
+        let tab_spaces = ctx.select::<Settings, usize>(|settings| settings.tab_spaces());
         let (line, column) = this.position;
         Row::new()
             .vertical_alignment(BoxAlignment::Center)
@@ -186,12 +174,10 @@ impl State<CaretStatus> for CaretStatusState {
                 Text::new(format!("Ln {line}, Col {column}"))
                     .text_style(small)
                     .boxed(),
-                Text::new(format!("Spaces: {}", crate::screen::editor::TAB_SPACES))
+                Text::new(format!("Spaces: {tab_spaces}"))
                     .text_style(small)
                     .boxed(),
-                Text::new("UTF-8")
-                    .text_style(small)
-                    .boxed(),
+                Text::new("UTF-8").text_style(small).boxed(),
                 Text::new(this.document.line_ending())
                     .text_style(small)
                     .boxed(),
