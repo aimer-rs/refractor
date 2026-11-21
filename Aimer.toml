@@ -14,9 +14,14 @@ extensions = ["rs", "toml", "md", "markdown", "txt"]
 utis = ["public.source-code", "public.plain-text"]
 mime_types = ["text/x-rust", "text/plain"]
 
+# A folder dropped on the icon: macOS only offers the app a folder when it declares `public.folder`.
+[[documents]]
+name = "Folder"
+utis = ["public.folder"]
+
 # Variable fonts: one file per style serves every weight. Registered in `src/fonts.rs`.
 [fonts]
-google_sans = "assets/Google_Sans/GoogleSans-VariableFont_GRAD,opsz,wght.ttf"
-google_sans_italic = "assets/Google_Sans/GoogleSans-Italic-VariableFont_GRAD,opsz,wght.ttf"
-jetbrains_mono = "assets/JetBrainsMono-2.304/fonts/variable/JetBrainsMono[wght].ttf"
-jetbrains_mono_italic = "assets/JetBrainsMono-2.304/fonts/variable/JetBrainsMono-Italic[wght].ttf"
+ui_font = "assets/Inter/Inter-VariableFont_opsz,wght.ttf"
+ui_font_italic = "assets/Inter/Inter-Italic-VariableFont_opsz,wght.ttf"
+mono_font = "assets/JetBrainsMono-2.304/fonts/variable/JetBrainsMono[wght].ttf"
+mono_font_italic = "assets/JetBrainsMono-2.304/fonts/variable/JetBrainsMono-Italic[wght].ttf"

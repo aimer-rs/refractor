@@ -11,7 +11,7 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 [dependencies]
 # aimer = {git="https://github.com/Cottons29/aimer.git", branch = "main"}
 
-aimer = { path = "../aimer", features = ["provider", "svg", "icons", "native", "markdown", "lottie"] }
+aimer = { path = "../aimer", features = ["provider", "svg", "icons", "native", "markdown", "lottie", "file-picker"] }
 
 # Tree-sitter, for the syntax of the code on screen. It is already in the framework's graph
 # (the markdown renderer uses it for code blocks); the app reads its parser directly because it
@@ -22,8 +22,22 @@ arborium = { version = "2.18.0", default-features = false, features = ["lang-rus
 # inside `src/lsp/protocol.rs`. Pinned, since the crate's 0.x releases change its types.
 lsp-types = "=0.97.0"
 # The JSON the protocol is written in.
-serde = "1.0.229"
+serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.149"
+# The file the settings are kept in. The version is the one the framework already uses (its macros read
+# `Aimer.toml` with it), so the build has no second copy; the features are only the ones the app uses: it
+# reads and writes a few keys, through serde.
+toml = { version = "1.2.0", default-features = false, features = ["std", "serde", "parse", "display"] }
+
+# The engine of ripgrep, as the libraries it is made of, for the search over the files of the folder: `ignore`
+# walks the folder as ripgrep does (it leaves out what `.gitignore` and hidden files leave out), `grep-searcher`
+# reads each file line by line (it skips binary files, and reads large files through a memory map or in a
+# buffer, never all at once) and `grep-regex` and `grep-matcher` are what it matches with. Pinned, since the
+# 0.x releases change their types; none is in the public signature of the app's modules.
+ignore = "=0.4.34"
+grep-searcher = "=0.1.17"
+grep-regex = "=0.1.14"
+grep-matcher = "=0.1.9"
 
 # Dev builds of these crates are optimized, which the aimer workspace's own profile does not
 # pass on to an app: the Unicode tables the text layout searches, and the byte-scan kernels, which
