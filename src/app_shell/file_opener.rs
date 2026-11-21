@@ -47,17 +47,14 @@ impl State<FileOpener> for FileOpenerState {
 
         let handler_store = store.clone();
         self.registration = Some(file_open::register(move |paths: &[PathBuf]| {
-            open(&handler_store, paths)
+            open(&handler_store, paths, false)
         }));
 
         // With nothing open, the folder's own entry point is: an editor that starts on an empty page
         // has nothing to show of itself.
         let notify = notifier(&store);
         store.update(|space| {
-            let main = space
-                .root
-                .join("src")
-                .join("main.rs");
+            let main = space.root.join("src").join("main.rs");
             if space.documents.is_empty() && main.is_file() {
                 let _ = space.open(&main, notify);
             }
@@ -69,7 +66,7 @@ impl State<FileOpener> for FileOpenerState {
         // is claimed once this frame is done.
         if let Some(venus) = Venus::current() {
             venus.spawn(async move {
-                file_open::claim_waiting_files(|paths| open(&store, paths));
+                file_open::claim_waiting_files(|paths| open(&store, paths, true));
             });
         }
     }
@@ -83,16 +80,55 @@ impl State<FileOpener> for FileOpenerState {
     }
 }
 
-/// Opens what `paths` hold: a folder becomes the folder of the tree, and a file that is a source file
-/// opens in a tab. Returns whether any was taken. A path that is neither is left for whatever else
-/// may take it.
-fn open(store: &ProviderHandle<Workspace>, paths: &[PathBuf]) -> bool {
+/// What to do with a folder the app is asked to open.
+#[derive(Debug, PartialEq, Eq)]
+enum FolderAction {
+    /// It is the folder already open: nothing to do.
+    Keep,
+    /// It becomes the folder of this window.
+    Adopt,
+    /// It is another folder: it gets a window of its own.
+    NewWindow,
+}
+
+/// Decides what a dropped `folder` means for a window showing `current`. The folder that launches the
+/// app (`launching`) arrives after the window chose its starting folder, so it is adopted, not given a
+/// second window.
+fn folder_action(current: &Path, folder: &Path, launching: bool) -> FolderAction {
+    if current == folder {
+        FolderAction::Keep
+    } else if launching {
+        FolderAction::Adopt
+    } else {
+        FolderAction::NewWindow
+    }
+}
+
+/// Starts another instance of the app on `folder`; `Workspace::initial` reads it as its first argument.
+fn open_new_window(folder: &Path) -> bool {
+    std::env::current_exe()
+        .and_then(|exe| std::process::Command::new(exe).arg(folder).spawn())
+        .is_ok()
+}
+
+/// Opens what `paths` hold: a folder becomes the folder of the tree, or of a new window when another
+/// folder is already open, and a file that is a source file opens in a tab. Returns whether any was
+/// taken. A path that is neither is left for whatever else may take it.
+fn open(store: &ProviderHandle<Workspace>, paths: &[PathBuf], launching: bool) -> bool {
     let mut taken = false;
     for path in paths {
         if path.is_dir() {
-            store.update(|space| space.set_root(path.clone()));
-            refresh_status(store);
-            taken = true;
+            let mut current = PathBuf::new();
+            store.update(|space| current = space.root.clone());
+            match folder_action(&current, path, launching) {
+                FolderAction::Keep => taken = true,
+                FolderAction::Adopt => {
+                    store.update(|space| space.set_root(path.clone()));
+                    refresh_status(store);
+                    taken = true;
+                }
+                FolderAction::NewWindow => taken |= open_new_window(path),
+            }
         } else if is_source(path) {
             let notify = notifier(store);
             store.update(|space| taken |= space.open(path, notify).is_ok());
@@ -114,6 +150,15 @@ fn is_source(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn another_folder_gets_a_window_unless_it_launches_the_app() {
+        let here = Path::new("/work/a");
+        assert_eq!(folder_action(here, here, false), FolderAction::Keep);
+        assert_eq!(folder_action(here, here, true), FolderAction::Keep);
+        assert_eq!(folder_action(here, Path::new("/work/b"), false), FolderAction::NewWindow);
+        assert_eq!(folder_action(here, Path::new("/work/b"), true), FolderAction::Adopt);
+    }
 
     #[test]
     fn source_files_are_what_the_app_offers_to_open() {
