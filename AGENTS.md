@@ -127,21 +127,17 @@ Additional rules:
 
 ## Validation Commands
 
-Run commands from the repository root. Prefer `cargo-nextest` when it is available. Build and run with your
-own target directory, so the IDE is not blocked.
+Run commands from the repository root. Prefer `cargo-nextest` when it is available.
 
 ```bash
 # A focused test
-CARGO_TARGET_DIR="agents/target" cargo nextest run test_name
+cargo nextest run test_name
 
 # All of this crate's tests
-CARGO_TARGET_DIR="agents/target" cargo nextest run
+cargo nextest run
 
-# Type-check only
-CARGO_TARGET_DIR="agents/target" cargo check --tests
+cargo check --tests
 
-# When agents/target is busy
-CARGO_TARGET_DIR="agents/target_xxx" cargo check
 ```
 
 For the framework, run its own commands from `../aimer` (see its `AGENTS.md`).

@@ -12,6 +12,7 @@
 //! text is edited ([`DocRenderer::edited`]).
 
 use std::borrow::Cow;
+use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
 use std::hash::{Hash, Hasher};
 use std::ops::Range;
@@ -22,12 +23,20 @@ use aimer::MarkdownTheme;
 use aimer::input::input::{TextEmbed, TextSnapshot};
 use aimer::style::LayoutSpacing;
 
+mod links;
+
+pub use links::DocLink;
+use links::LinkScanner;
+
+/// What is done with a link of a rendered block that is clicked.
+pub type LinkHandler = Rc<dyn Fn(&DocLink)>;
+
 /// How wide, in logical pixels, the gap is between the bar of a rendered block and its text.
 pub const GAP: f32 = 24.0;
 /// How wide a character of the code font is, as a share of its size: what an indent of spaces is worth
 /// in pixels. The bar stands at the block's indent, and its text after it.
 pub const CODE_ADVANCE: f32 = 0.6;
-/// The size of the code the indent is measured in.
+/// The size of the code a renderer measures an indent in until it is told another.
 const CODE_SIZE: f32 = 13.0;
 
 /// The most lines a block is looked for across. A longer run of comment is shown as written: a wall of
@@ -95,7 +104,7 @@ pub struct DocBlock {
 }
 
 /// The bytes of line `number`, without its line break.
-fn line_bytes(text: &TextSnapshot, number: usize) -> Range<usize> {
+pub(crate) fn line_bytes(text: &TextSnapshot, number: usize) -> Range<usize> {
     let range = text.line_range(number);
     let mut end = range.end;
     if end > range.start && text.byte_at(end - 1) == Some(b'\n') {
@@ -242,26 +251,120 @@ pub fn blocks_in(text: &TextSnapshot, bytes: Range<usize>) -> Vec<DocBlock> {
     blocks
 }
 
-/// The width in logical pixels of `indent` bytes of indent.
-pub fn indent_px(indent: usize) -> f32 {
-    indent as f32 * CODE_SIZE * CODE_ADVANCE
+/// The width in logical pixels of `indent` bytes of indent in code of `code_size` logical pixels.
+pub fn indent_px(indent: usize, code_size: f32) -> f32 {
+    indent as f32 * code_size * CODE_ADVANCE
+}
+
+/// The width in logical pixels of a rendered block whose text is at most `max_text` wide: its indent and
+/// the gap after the bar, then the text. `None` when there is no limit, which leaves the block as wide as
+/// the editor offers. A width is clamped to what the editor offers, so a limit wider than the editor
+/// changes nothing.
+fn block_width(indent: usize, code_size: f32, max_text: Option<f32>) -> Option<f32> {
+    max_text.map(|text| indent_px(indent, code_size) + GAP + text)
 }
 
 /// Renders the doc comments of a text, and says which blocks are shown as written. Make one for a
 /// document and keep it.
 pub struct DocRenderer {
     theme: MarkdownTheme,
+    /// Counts the themes the renderer was given after the first: part of the key of an embed, since an
+    /// embed that is kept is drawn again only when its key changes, and a new theme must redraw it.
+    theme_generation: u64,
+    /// The size of the code the blocks sit in, which an indent is measured in.
+    code_size: f32,
+    /// The widest the text of a block is drawn, in logical pixels, or `None` for as wide as the editor.
+    max_width: Option<f32>,
     /// The first lines of the blocks that are shown as written.
     as_written: BTreeSet<usize>,
+    /// What is done when a link of a rendered block is clicked; shared with the widgets of the blocks.
+    on_link: Rc<RefCell<Option<LinkHandler>>>,
+    /// The blocks [`bar_indent`](Self::bar_indent) found, for the text it was last asked about.
+    bars: RefCell<BarCache>,
+}
+
+/// What [`DocRenderer::bar_indent`] has worked out about one text, so that a frame that asks about the same
+/// lines again as the text has not changed reads none of them again. It is what makes a line cost a lookup
+/// in a map and not a walk over its block: without it a block of `n` lines is read `2n` times each frame.
+#[derive(Default)]
+struct BarCache {
+    /// The text the entries are about. A snapshot is made again by any edit, so the entries never stand
+    /// for another text than the one they were worked out from.
+    text: Option<TextSnapshot>,
+    /// For a line, the indent of the first line of its block, or `None` when it is not in a block.
+    lines: HashMap<usize, Option<(DocBlock, usize)>>,
+    /// How many lines were worked out from the text rather than found here.
+    #[cfg(test)]
+    scans: usize,
+}
+
+impl BarCache {
+    /// The most lines kept for one text. The lines on screen are asked for on every frame, so what is kept
+    /// is the window being scrolled through; a text that has been scrolled over end to end starts again
+    /// when it reaches this, and the memory stays that of a screenful and a bit.
+    const MAX_LINES: usize = 4096;
 }
 
 impl DocRenderer {
+    /// The width in logical pixels the text of a block is limited to in the editor: about a hundred
+    /// characters of prose, past which a line is hard to follow.
+    pub const READABLE_WIDTH: f32 = 640.0;
+
     /// A renderer whose blocks are drawn with `theme`.
     pub fn new(theme: MarkdownTheme) -> Self {
         Self {
             theme,
+            theme_generation: 0,
+            code_size: CODE_SIZE,
+            max_width: None,
+            on_link: Rc::default(),
             as_written: BTreeSet::new(),
+            bars: RefCell::new(BarCache::default()),
         }
+    }
+
+    /// Draws the blocks with `theme` from now on. The embeds it makes next are told apart from those
+    /// made before, so what shows them draws them again.
+    pub fn set_theme(&mut self, theme: MarkdownTheme) {
+        self.theme = theme;
+        self.theme_generation += 1;
+    }
+
+    /// Measures the indent of a block in code of `size` logical pixels, as the text beside it is set in. A
+    /// size that is not the one it has makes the embeds new, as [`set_theme`](Self::set_theme) does.
+    pub fn set_code_size(&mut self, size: f32) {
+        if self.code_size != size {
+            self.code_size = size;
+            self.theme_generation += 1;
+        }
+    }
+
+    /// The widest, in logical pixels, the text of a rendered block is drawn, not counting the indent and
+    /// the gap after the bar. `None` is no limit.
+    #[cfg(test)]
+    pub fn max_width(&self) -> Option<f32> {
+        self.max_width
+    }
+
+    /// Limits the text of a rendered block to `width` logical pixels, so that a long line of comment
+    /// wraps to a readable column and not to the whole editor. `None` removes the limit. A width that is
+    /// not a number or is endless is no limit, and a negative one is none at all. A limit that is not the
+    /// one it has makes the embeds new, as [`set_theme`](Self::set_theme) does.
+    pub fn set_max_width(&mut self, width: Option<f32>) {
+        let width = width
+            .filter(|width| width.is_finite())
+            .map(|width| width.max(0.0));
+        if self.max_width != width {
+            self.max_width = width;
+            self.theme_generation += 1;
+        }
+    }
+
+    /// Calls `handler` with the link when one in a rendered block is clicked. The link says which line of the text its name is
+    /// on and at which byte of the line, which is where to ask what it names. Replaces the handler it had, and
+    /// reaches the blocks drawn already.
+    pub fn set_on_link(&mut self, handler: impl Fn(&DocLink) + 'static) {
+        *self.on_link.borrow_mut() = Some(Rc::new(handler));
     }
 
     /// Whether the block that starts on `first_line` is shown rendered.
@@ -381,11 +484,46 @@ impl DocRenderer {
     /// it that is on screen and so the one that has a bar and a number. The answer is how many bytes of
     /// indent the block has, which is where its bar goes.
     pub fn bar_indent(&self, text: &TextSnapshot, number: usize) -> Option<usize> {
-        let block = block_at(text, number)?;
-        if self.as_written.contains(&block.first_line) {
-            return None;
+        let (block, indent) = self.block_with_indent(text, number)?;
+        (!self.as_written.contains(&block.first_line)).then_some(indent)
+    }
+
+    /// The block that holds line `number` and the indent of its first line, kept for the text so that
+    /// the next ask about any line of the block is a lookup. What is shown as written is not part of it,
+    /// so toggling a block needs nothing forgotten.
+    fn block_with_indent(&self, text: &TextSnapshot, number: usize) -> Option<(DocBlock, usize)> {
+        let mut cache = self.bars.borrow_mut();
+        if !cache
+            .text
+            .as_ref()
+            .is_some_and(|cached| cached.ptr_eq(text))
+        {
+            cache.text = Some(text.clone());
+            cache.lines.clear();
+        } else if let Some(found) = cache.lines.get(&number) {
+            return found.clone();
         }
-        prefix_of(&line_text(text, block.first_line)).map(|prefix| prefix.indent)
+        if cache.lines.len() >= BarCache::MAX_LINES {
+            cache.lines.clear();
+        }
+        #[cfg(test)]
+        {
+            cache.scans += 1;
+        }
+        let found = block_at(text, number).and_then(|block| {
+            let indent = prefix_of(&line_text(text, block.first_line))?.indent;
+            Some((block, indent))
+        });
+        // Every line of the block has the same answer, and the lines of a block on screen are asked for
+        // one after the other, so the walk that found this one is not made again for the rest.
+        if let Some((block, _)) = &found {
+            for line in block.first_line..=block.last_line {
+                cache.lines.insert(line, found.clone());
+            }
+        } else {
+            cache.lines.insert(number, None);
+        }
+        found
     }
 
     /// The embeds of the rendered blocks that have a line in `window`: each stands for the whole block,
@@ -398,51 +536,75 @@ impl DocRenderer {
             if self.as_written.contains(&block.first_line) {
                 continue;
             }
-            let (markdown, indent) = markdown_of(text, &block);
+            let (markdown, indent, links) = markdown_of(text, &block);
             let range =
                 line_bytes(text, block.first_line).start..line_bytes(text, block.last_line).end;
-            let hashed = hash_of(&(&markdown, indent, block.first_line));
+            // The links are in the key because the markdown has only their numbers: one that moves along its line is
+            // another widget, which is clicked to another place.
+            let hashed = hash_of(&(&markdown, indent, block.first_line, &links));
             let occurrence = seen
                 .entry(hashed)
                 .and_modify(|count| *count += 1)
                 .or_insert(0);
-            let key = hash_of(&(hashed, *occurrence));
+            let key = hash_of(&(hashed, *occurrence, self.theme_generation));
             let theme = self.theme;
+            let code_size = self.code_size;
+            let width = block_width(indent, code_size, self.max_width);
             let markdown: Rc<str> = Rc::from(markdown);
+            let links: Rc<[DocLink]> = Rc::from(links);
+            let on_link = Rc::clone(&self.on_link);
             embeds.push(TextEmbed::new(range, key, move || {
                 let markdown = Rc::clone(&markdown);
-                let left = indent_px(indent) + GAP;
-                Container::new()
+                let on_link = Rc::clone(&on_link);
+                // The handler is looked up when a link is clicked, so one set after the block was drawn is the one used.
+                let click: Rc<dyn Fn(&DocLink)> = Rc::new(move |link| {
+                    let handler = on_link.borrow().clone();
+                    if let Some(handler) = handler {
+                        handler(link);
+                    }
+                });
+                let left = indent_px(indent, code_size) + GAP;
+                let container = match width {
+                    Some(width) => Container::new().width(width),
+                    None => Container::new(),
+                };
+                container
                     .padding(
                         LayoutSpacing::new()
                             .left(left as u32)
                             .top(4)
                             .bottom(6),
                     )
-                    .child(crate::markdown::doc_viewer(&markdown, &theme))
+                    .child(crate::markdown::doc_viewer(
+                        &markdown,
+                        &theme,
+                        Rc::clone(&links),
+                        click,
+                    ))
             }));
         }
         embeds
     }
 }
 
-/// The markdown of a block, which is its lines with the markers taken off, and the bytes of indent the
-/// block has (that of its first line).
-fn markdown_of(text: &TextSnapshot, block: &DocBlock) -> (String, usize) {
+/// The markdown of a block, which is its lines with the markers taken off and each link ([`DocLink`]) followed by the
+/// target that numbers it, the bytes of indent the block has (that of its first line), and the links.
+fn markdown_of(text: &TextSnapshot, block: &DocBlock) -> (String, usize, Vec<DocLink>) {
     let mut markdown = String::new();
     let mut indent = 0;
+    let mut scanner = LinkScanner::new();
     for number in block.first_line..=block.last_line {
         let line = line_text(text, number);
         let prefix = prefix_of(&line).expect("a line of a block is a doc comment line");
         if number == block.first_line {
             indent = prefix.indent;
         }
-        markdown.push_str(&line[prefix.text..]);
+        scanner.scan_line(&line[prefix.text..], number, prefix.text, &mut markdown);
         if number < block.last_line {
             markdown.push('\n');
         }
     }
-    (markdown, indent)
+    (markdown, indent, scanner.into_links())
 }
 
 fn hash_of(value: &impl Hash) -> u64 {

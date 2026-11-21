@@ -34,11 +34,7 @@ fn git_directory(git: &Path) -> Option<PathBuf> {
         return Some(git.to_path_buf());
     }
     let pointer = std::fs::read_to_string(git).ok()?;
-    let target = Path::new(
-        pointer
-            .trim()
-            .strip_prefix("gitdir: ")?,
-    );
+    let target = Path::new(pointer.trim().strip_prefix("gitdir: ")?);
     Some(if target.is_absolute() {
         target.to_path_buf()
     } else {
@@ -143,14 +139,10 @@ impl Status {
                     .skip(1)
                     .take_while(|ancestor| ancestor.starts_with(top))
                 {
-                    status
-                        .folders
-                        .insert(ancestor.to_path_buf());
+                    status.folders.insert(ancestor.to_path_buf());
                 }
             }
-            status
-                .files
-                .insert(path, change);
+            status.files.insert(path, change);
         }
         status
     }

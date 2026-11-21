@@ -11,10 +11,6 @@ pub fn dot(diameter: u32, color: Color) -> impl Widget {
         .box_child(
             Container::new()
                 .decoration([BorderRadius::all(diameter / 2 + 1).notype(), color.notype()])
-                .child(
-                    SizedBox::new()
-                        .width(diameter)
-                        .height(diameter),
-                ),
+                .child(SizedBox::new().width(diameter).height(diameter)),
         )
 }

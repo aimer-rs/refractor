@@ -26,7 +26,9 @@ impl Word {
         if self.text.is_empty() {
             return self.triggered;
         }
-        !self.text.starts_with(|c: char| c.is_ascii_digit())
+        !self
+            .text
+            .starts_with(|c: char| c.is_ascii_digit())
     }
 }
 
@@ -48,7 +50,11 @@ pub fn word_before(text: &TextSnapshot, caret: usize) -> Option<Word> {
         return None;
     }
     let triggered = head.ends_with("::") || (head.ends_with('.') && !head.ends_with(".."));
-    Some(Word { start: from + at, text: word.to_owned(), triggered })
+    Some(Word {
+        start: from + at,
+        text: word.to_owned(),
+        triggered,
+    })
 }
 
 /// Where the word at the end of `before` starts: the run of letters, digits and underscores.
@@ -77,8 +83,15 @@ mod tests {
     #[test]
     fn the_word_is_the_run_of_letters_digits_and_underscores_before_the_caret() {
         assert_eq!(word("    pu"), (4, "pu".into(), false));
-        assert_eq!(word("let x = snake_case_9"), (8, "snake_case_9".into(), false));
-        assert_eq!(word("let x = "), (8, String::new(), false), "after a space there is no word");
+        assert_eq!(
+            word("let x = snake_case_9"),
+            (8, "snake_case_9".into(), false)
+        );
+        assert_eq!(
+            word("let x = "),
+            (8, String::new(), false),
+            "after a space there is no word"
+        );
         assert_eq!(word(""), (0, String::new(), false), "the empty text");
     }
 
@@ -98,7 +111,11 @@ mod tests {
         assert!(!word("a..").2, "a range is not a member");
         assert!(!word("a:").2, "one colon is not a path");
         assert!(!word("a, ").2);
-        assert_eq!(word("value."), (6, String::new(), true), "the word is where the caret is");
+        assert_eq!(
+            word("value."),
+            (6, String::new(), true),
+            "the word is where the caret is"
+        );
     }
 
     #[test]
@@ -111,31 +128,49 @@ mod tests {
         assert!(!completable(""), "nothing is typed");
         assert!(!completable("a "), "a space");
         assert!(!completable("1st"), "a number");
-        assert!(!completable("x.1st"), "a number after a dot is a field of a tuple");
+        assert!(
+            !completable("x.1st"),
+            "a number after a dot is a field of a tuple"
+        );
     }
 
     #[test]
     fn a_comment_has_no_word() {
         assert_eq!(at_end("let a = 1; // pu"), None);
-        assert!(at_end("let a = 1;\npu").is_some(), "the line before is another line");
+        assert!(
+            at_end("let a = 1;\npu").is_some(),
+            "the line before is another line"
+        );
     }
 
     #[test]
     fn crlf_multi_byte_text_and_long_lines_are_handled() {
         let found = at_end("let caf\u{e9} = 1;\r\nlet x = ret").expect("ret");
-        assert_eq!((found.text.as_str(), found.start), ("ret", "let caf\u{e9} = 1;\r\nlet x = ".len()));
+        assert_eq!(
+            (found.text.as_str(), found.start),
+            ("ret", "let caf\u{e9} = 1;\r\nlet x = ".len())
+        );
         // A word after multi-byte text, where the lookback could start inside a character.
         let text = format!("{} pu", "\u{e9}".repeat(40));
         assert_eq!(at_end(&text).expect("pu after accents").start, 81);
         // A very long line costs no more than a short one, and a long word is cut at the lookback.
         let long = format!("{} pu", "a".repeat(100_000));
         assert_eq!(at_end(&long).expect("pu").start, 100_001);
-        assert!(at_end(&"a".repeat(100_000)).expect("a word").text.len() <= LOOKBACK);
+        assert!(
+            at_end(&"a".repeat(100_000))
+                .expect("a word")
+                .text
+                .len()
+                <= LOOKBACK
+        );
     }
 
     #[test]
     fn a_combining_mark_does_not_end_up_in_the_word() {
         let found = at_end("pu\u{301}").expect("a place");
-        assert_eq!(found.text, "", "pu followed by a mark is not a word that ends at the caret");
+        assert_eq!(
+            found.text, "",
+            "pu followed by a mark is not a word that ends at the caret"
+        );
     }
 }

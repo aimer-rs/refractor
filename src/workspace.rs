@@ -7,8 +7,10 @@ use std::rc::Rc;
 
 use aimer::{ProviderHandle, Venus};
 
+use crate::auto_save::AutoSave;
 use crate::completion::LspSource;
 use crate::document::{Document, Language};
+use crate::file_sync::FileSync;
 use crate::git::{self, Change};
 use crate::lsp::{Lsp, Place, Problem, Summary};
 use crate::tree;
@@ -21,8 +23,10 @@ pub struct Workspace {
     /// The branch the folder is on, if it is in a repository.
     pub branch: Option<String>,
     pub documents: Vec<Rc<Document>>,
-    /// The document being edited, by its identity.
+    /// The tab being shown, by its identity: a document's, or [`Self::SETTINGS_TAB`] for the settings.
     pub active: Option<u64>,
+    /// Whether the settings are open in a tab, which is the last of the row.
+    pub settings_open: bool,
     /// The folders that are open in the file tree.
     expanded: HashSet<PathBuf>,
     /// What the status bar says about the last thing that went wrong, if anything.
@@ -43,9 +47,16 @@ pub struct Workspace {
     /// Counts the times the documents' changes were reported, so what watches the workspace is told
     /// when a document becomes changed or unchanged, which the list of documents does not show.
     pub changes: u64,
+    /// Saves a changed file by itself, when the user has asked for that. Shared by the copies of the workspace.
+    auto_save: Rc<AutoSave>,
+    /// Looks at the open files now and then, for what something else changed. Shared by the copies of the workspace.
+    file_sync: Rc<FileSync>,
 }
 
 impl Workspace {
+    /// The identity of the settings tab. Documents are numbered from 1, so no document has it.
+    pub const SETTINGS_TAB: u64 = 0;
+
     /// A workspace on the folder `root`, with nothing open.
     pub fn new(root: PathBuf) -> Self {
         let branch = git::branch_of(&root);
@@ -55,6 +66,7 @@ impl Workspace {
             branch,
             documents: Vec::new(),
             active: None,
+            settings_open: false,
             expanded: HashSet::new(),
             message: None,
             closing: None,
@@ -64,6 +76,8 @@ impl Workspace {
             lsp,
             problems_open: false,
             changes: 0,
+            auto_save: AutoSave::new(),
+            file_sync: FileSync::new(),
         };
         space.refresh();
         space
@@ -71,15 +85,11 @@ impl Workspace {
 
     /// The workspace the app starts with, on the folder [`choose_root`] picks.
     pub fn initial() -> Self {
-        let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let first_argument = std::env::args_os()
-            .nth(1)
-            .map(PathBuf::from);
+        let first_argument = std::env::args_os().nth(1).map(PathBuf::from);
         Self::new(choose_root(
             first_argument,
             std::env::var_os("REFRACTOR_ROOT").map(PathBuf::from),
             std::env::current_dir().ok(),
-            manifest,
             std::env::var_os("HOME").map(PathBuf::from),
         ))
     }
@@ -91,20 +101,18 @@ impl Workspace {
 
     /// The name of the folder, for the title.
     pub fn name(&self) -> String {
-        self.root
-            .file_name()
-            .map_or_else(
-                || self.root.display().to_string(),
-                |name| {
-                    name.to_string_lossy()
-                        .into_owned()
-                },
-            )
+        self.root.file_name().map_or_else(
+            || self.root.display().to_string(),
+            |name| name.to_string_lossy().into_owned(),
+        )
     }
 
     /// Makes `root` the folder, and closes nothing: the files stay open.
     pub fn set_root(&mut self, root: PathBuf) {
         self.branch = git::branch_of(&root);
+        // The server is run on the folder, so it follows: an app opened by a folder dropped on its icon starts on
+        // the folder it was run from, and is given the dropped one after.
+        self.lsp.set_root(root.clone());
         self.root = root;
         self.expanded.clear();
         self.status = Rc::default();
@@ -131,8 +139,7 @@ impl Workspace {
 
     /// Whether something inside the folder `path` is changed.
     pub fn has_changes_inside(&self, path: &Path) -> bool {
-        self.status
-            .has_changes_inside(path)
+        self.status.has_changes_inside(path)
     }
 
     /// Whether anything in the repository is changed.
@@ -148,8 +155,7 @@ impl Workspace {
     /// Opens or closes the folder `path` in the tree.
     pub fn toggle(&mut self, path: &Path) {
         if !self.expanded.remove(path) {
-            self.expanded
-                .insert(path.to_path_buf());
+            self.expanded.insert(path.to_path_buf());
         }
         self.refresh();
     }
@@ -176,6 +182,13 @@ impl Workspace {
         };
         self.next_id += 1;
         self.active = Some(document.id);
+        // A change of its text may be saved by itself a moment after: the document is not kept alive by what watches it.
+        let (auto_save, weak) = (Rc::clone(&self.auto_save), Rc::downgrade(&document));
+        document.on_edit(Rc::new(move || {
+            if let Some(document) = weak.upgrade() {
+                let _ = auto_save.edited(&document);
+            }
+        }));
         if document.language == Language::Rust {
             // The server is run and told later, and not inside this update: `told` is how what shows it
             // is drawn again when it has something to say.
@@ -185,6 +198,16 @@ impl Workspace {
         }
         self.documents.push(document);
         Ok(())
+    }
+
+    /// What looks at the open files for what something else changed.
+    pub fn file_sync(&self) -> Rc<FileSync> {
+        Rc::clone(&self.file_sync)
+    }
+
+    /// What saves a changed file by itself, when the user has asked for that.
+    pub fn auto_save(&self) -> Rc<AutoSave> {
+        Rc::clone(&self.auto_save)
     }
 
     /// The language server of the workspace, for what asks it something of a file that is open.
@@ -198,26 +221,73 @@ impl Workspace {
     /// opened is not gone to, and what is shown is as it was.
     pub fn go_to_place(&mut self, place: &Place, notify: Rc<dyn Fn()>) -> io::Result<()> {
         self.open(&place.path, notify)?;
-        let document = self.documents.iter().find(|document| document.path == place.path).expect("a file that was opened is open");
+        let document = self
+            .documents
+            .iter()
+            .find(|document| document.path == place.path)
+            .expect("a file that was opened is open");
         let snapshot = document.controller.snapshot();
-        document.show(self.lsp.byte_of(&snapshot, place.at)..self.lsp.byte_of(&snapshot, place.end));
+        document
+            .show(self.lsp.byte_of(&snapshot, place.at)..self.lsp.byte_of(&snapshot, place.end));
         Ok(())
     }
 
-    /// Shows the tab `id`.
+    /// Shows `len` bytes at the byte `column` of the line `line` (counted from 1) of the file `path`, opening the file if it is not
+    /// open, as [`go_to_place`](Self::go_to_place) does for a place the server named. This is for a place that was found by reading
+    /// the file, which counts bytes. A line past the end is the last, a column past the end of its line is its end, and a line of
+    /// 0 is the first. A file that cannot be opened is not gone to.
+    pub fn go_to_line(
+        &mut self,
+        path: &Path,
+        line: usize,
+        column: usize,
+        len: usize,
+        notify: Rc<dyn Fn()>,
+    ) -> io::Result<()> {
+        self.open(path, notify)?;
+        let document = self
+            .documents
+            .iter()
+            .find(|document| document.path == path)
+            .expect("a file that was opened is open");
+        let snapshot = document.controller.snapshot();
+        let row = line.saturating_sub(1).min(snapshot.line_count().saturating_sub(1));
+        let row = snapshot.line_range(row);
+        let start = (row.start + column).min(row.end);
+        document.show(start..start.saturating_add(len));
+        Ok(())
+    }
+
+    /// Shows the tab `id`: a document's, or the settings if they are open. A tab that is not open is not shown.
     pub fn activate(&mut self, id: u64) {
         if self
             .documents
             .iter()
             .any(|document| document.id == id)
+            || (id == Self::SETTINGS_TAB && self.settings_open)
         {
             self.active = Some(id);
         }
     }
 
+    /// Opens the settings in a tab after the files, or shows the tab if it is open already.
+    pub fn open_settings(&mut self) {
+        self.settings_open = true;
+        self.active = Some(Self::SETTINGS_TAB);
+    }
+
+    /// Whether the settings are the tab being shown.
+    pub fn settings_active(&self) -> bool {
+        self.settings_open && self.active == Some(Self::SETTINGS_TAB)
+    }
+
     /// Asks to close the tab `id`. A tab with no unsaved changes closes at once. One with changes
     /// does not: the status bar says so, and asking again closes it and throws the changes away.
     pub fn request_close(&mut self, id: u64) {
+        if id == Self::SETTINGS_TAB {
+            // Settings are kept as they are changed, so there is nothing to lose.
+            return self.close(id);
+        }
         let Some(document) = self
             .documents
             .iter()
@@ -241,6 +311,19 @@ impl Workspace {
     pub fn close(&mut self, id: u64) {
         self.closing = None;
         self.message = None;
+        if id == Self::SETTINGS_TAB {
+            if self.settings_open {
+                self.settings_open = false;
+                if self.active == Some(id) {
+                    // The tab is the last, so the one before it is the last file.
+                    self.active = self
+                        .documents
+                        .last()
+                        .map(|document| document.id);
+                }
+            }
+            return;
+        }
         let Some(index) = self
             .documents
             .iter()
@@ -263,6 +346,14 @@ impl Workspace {
         }
     }
 
+    /// The text of the file `path` as the editor has it, with the changes that are not saved, if it is open.
+    pub fn buffer_of(&self, path: &Path) -> Option<aimer::input::input::TextSnapshot> {
+        self.documents
+            .iter()
+            .find(|document| document.path == path)
+            .map(|document| document.controller.snapshot())
+    }
+
     /// The document being edited.
     pub fn active_document(&self) -> Option<&Rc<Document>> {
         self.documents
@@ -272,7 +363,9 @@ impl Workspace {
 
     /// What the language server says of the document being edited, if it is one it is told of.
     pub fn lsp_summary(&self) -> Option<Summary> {
-        let document = self.active_document().filter(|document| document.language == Language::Rust)?;
+        let document = self
+            .active_document()
+            .filter(|document| document.language == Language::Rust)?;
         let summary = self.lsp.summary(&document.path);
         summary.status.is_some().then_some(summary)
     }
@@ -293,7 +386,10 @@ impl Workspace {
         if !self.problems_open {
             return Vec::new();
         }
-        match self.active_document().filter(|document| document.language == Language::Rust) {
+        match self
+            .active_document()
+            .filter(|document| document.language == Language::Rust)
+        {
             Some(document) => self.lsp.problems(&document.path),
             None => Vec::new(),
         }
@@ -322,6 +418,24 @@ impl Workspace {
         self.closing = None;
     }
 
+    /// Records what was found of the file of `document` when it was looked at, because something else may have changed it: said in the
+    /// status bar, and the tree is read again, since what changed a file may have changed the folder as well. Nothing is said of a file
+    /// that is as it was.
+    pub fn report_external(&mut self, document: &Document, found: &crate::file_sync::Synced) {
+        use crate::file_sync::Synced;
+        let name = &document.name;
+        let message = match found {
+            Synced::Same => return,
+            Synced::Reloaded => format!("{name} changed on disk and was reloaded"),
+            Synced::Conflict => format!("{name} changed on disk, and so did you: save to overwrite it, or close the tab to discard your changes"),
+            Synced::Deleted => format!("{name} was deleted from disk: save to write it again"),
+            Synced::Failed(why) => format!("{name} changed on disk but could not be read: {why}"),
+        };
+        self.message = Some(message);
+        self.closing = None;
+        self.refresh();
+    }
+
     /// The path of `path` from the folder, for the breadcrumb, or the whole path when it is outside it.
     pub fn relative(&self, path: &Path) -> PathBuf {
         path.strip_prefix(&self.root)
@@ -335,6 +449,19 @@ impl Workspace {
 pub fn notifier(handle: &ProviderHandle<Workspace>) -> Rc<dyn Fn()> {
     let handle = handle.clone();
     Rc::new(move || handle.update(|space| space.touch()))
+}
+
+/// Saves `document`: the file is written, the language server is told that it was, which makes it check the project, and git is
+/// asked again. The save is made here and not inside an update of the workspace, because a document that becomes unchanged tells the
+/// workspace so, which is an update. Used for a save by hand and for a save by itself, which are the same.
+pub fn save_document(store: &ProviderHandle<Workspace>, document: &Rc<Document>) {
+    let result = document.save();
+    if result.is_ok() && document.language == Language::Rust {
+        store.read().lsp().saved(&document.path);
+    }
+    store.update(|space| space.report_save(&document.name, result));
+    // What git says of the file changes with the save.
+    refresh_status(store);
 }
 
 /// Asks git for the status of the folder, and gives the answer to the workspace when it comes. Git is
@@ -360,13 +487,13 @@ pub fn refresh_status(handle: &ProviderHandle<Workspace>) {
 
 /// The folder to start on: the first of what the command line names (a folder, or a file, which
 /// gives the folder it is in), the `REFRACTOR_ROOT` variable, the folder the app was started in
-/// (unless it is the root of the disk, which is where an app launched from the desktop starts), the
-/// folder the app was built from, and the home folder that is a folder.
+/// (unless it is the root of the disk, which is where an app launched from the desktop starts), and the
+/// home folder that is a folder. No folder of the machine that built the app is named here: a release
+/// build runs elsewhere.
 pub fn choose_root(
     argument: Option<PathBuf>,
     variable: Option<PathBuf>,
     current: Option<PathBuf>,
-    built_from: &Path,
     home: Option<PathBuf>,
 ) -> PathBuf {
     let from_argument = argument.map(|path| {
@@ -378,13 +505,7 @@ pub fn choose_root(
         }
     });
     let current = current.filter(|path| path.parent().is_some());
-    [
-        from_argument,
-        variable,
-        current,
-        Some(built_from.to_path_buf()),
-        home,
-    ]
+    [from_argument, variable, current, home]
     .into_iter()
     .flatten()
     .find(|path| path.is_dir())
@@ -415,14 +536,29 @@ mod tests {
         let mut space = workspace(&scratch);
         space.open(&rust, notify()).unwrap();
         space.open(&text, notify()).unwrap();
-        let by_name = |name: &str| space.documents.iter().find(|document| document.name == name).unwrap().completions().is_some();
+        let by_name = |name: &str| {
+            space
+                .documents
+                .iter()
+                .find(|document| document.name == name)
+                .unwrap()
+                .completions()
+                .is_some()
+        };
         assert!(by_name("a.rs"));
         assert!(!by_name("a.txt"));
     }
 
     /// A place in `path` at `line` and `character`, `width` characters wide.
     fn place(path: &Path, line: u32, character: u32, width: u32) -> Place {
-        Place { path: path.to_path_buf(), at: Position { line, character }, end: Position { line, character: character + width } }
+        Place {
+            path: path.to_path_buf(),
+            at: Position { line, character },
+            end: Position {
+                line,
+                character: character + width,
+            },
+        }
     }
 
     #[test]
@@ -433,14 +569,58 @@ mod tests {
         let b = scratch.file("b.rs", "// caf\u{e9}\nfn target() {}\n");
         let mut space = workspace(&scratch);
         space.open(&a, notify()).unwrap();
-        space.go_to_place(&place(&b, 1, 3, 6), notify()).unwrap();
-        let active = space.active_document().expect("the file was opened and is the one shown");
+        space
+            .go_to_place(&place(&b, 1, 3, 6), notify())
+            .unwrap();
+        let active = space
+            .active_document()
+            .expect("the file was opened and is the one shown");
         assert_eq!(active.path, b);
         // Line 1 begins after "// café\n", which is 9 bytes (the accent is two), and the name is 3 characters in.
         assert_eq!(active.controller.value().selection().range(), 9 + 3..9 + 3);
         // The text area is asked to show the name, which is `target`: from where the caret is to the end of it.
-        assert_eq!(active.controller.take_locate(), Some(9 + 3..9 + 9), "the whole name, and not only where it starts");
+        assert_eq!(
+            active.controller.take_locate(),
+            Some(9 + 3..9 + 9),
+            "the whole name, and not only where it starts"
+        );
         assert_eq!(space.documents.len(), 2);
+    }
+
+    #[test]
+    fn going_to_a_line_opens_the_file_and_shows_the_bytes_at_the_column() {
+        let scratch = Scratch::new("go-to-line");
+        let a = scratch.file("a.txt", "one\r\n// caf\u{e9} needle\nthree");
+        let mut space = workspace(&scratch);
+        // The second line (counted from 1), seven bytes in: `needle` is after the accent, which is two bytes.
+        space.go_to_line(&a, 2, "// caf\u{e9} ".len(), 6, notify()).unwrap();
+        let active = space.active_document().expect("the file was opened and is the one shown");
+        let line = active.controller.snapshot().line_range(1);
+        let start = line.start + "// caf\u{e9} ".len();
+        assert_eq!(active.controller.value().selection().range(), start..start);
+        assert_eq!(active.controller.take_locate(), Some(start..start + 6));
+    }
+
+    #[test]
+    fn going_to_a_line_that_is_not_there_goes_to_the_end_of_the_text_and_not_past_it() {
+        let scratch = Scratch::new("go-to-line-past");
+        let a = scratch.file("a.txt", "one\ntwo");
+        let mut space = workspace(&scratch);
+        space.go_to_line(&a, 99, 99, 5, notify()).unwrap();
+        let active = space.active_document().unwrap();
+        let len = active.controller.value().len();
+        assert_eq!(active.controller.value().selection().range(), len..len);
+        // A line of zero, which is not a line number, is the first.
+        space.go_to_line(&a, 0, 0, 1, notify()).unwrap();
+        assert_eq!(space.active_document().unwrap().controller.value().selection().range(), 0..0);
+    }
+
+    #[test]
+    fn going_to_a_line_of_a_file_that_is_not_there_is_an_error_and_changes_nothing() {
+        let scratch = Scratch::new("go-to-line-missing");
+        let mut space = workspace(&scratch);
+        assert!(space.go_to_line(&scratch.0.join("gone.txt"), 1, 0, 1, notify()).is_err());
+        assert!(space.documents.is_empty());
     }
 
     #[test]
@@ -451,15 +631,42 @@ mod tests {
         let mut space = workspace(&scratch);
         space.open(&a, notify()).unwrap();
         space.open(&b, notify()).unwrap();
-        space.go_to_place(&place(&a, 2, 2, 2), notify()).unwrap();
+        space
+            .go_to_place(&place(&a, 2, 2, 2), notify())
+            .unwrap();
         assert_eq!(space.documents.len(), 2, "it was open");
         let active = space.active_document().unwrap();
-        assert_eq!((active.path.clone(), active.controller.value().selection().range()), (a, 10..10));
+        assert_eq!(
+            (
+                active.path.clone(),
+                active.controller.value().selection().range()
+            ),
+            (a, 10..10)
+        );
         // A position past the end of the text is the end of it, and one in a file that cannot be read is not gone to.
-        space.go_to_place(&place(&b, 50, 50, 4), notify()).unwrap();
-        assert_eq!(space.active_document().unwrap().controller.value().selection().range(), 1..1);
-        assert!(space.go_to_place(&place(&scratch.0.join("missing.rs"), 0, 0, 1), notify()).is_err());
-        assert_eq!(space.active_document().unwrap().path, b, "what is shown is as it was");
+        space
+            .go_to_place(&place(&b, 50, 50, 4), notify())
+            .unwrap();
+        assert_eq!(
+            space
+                .active_document()
+                .unwrap()
+                .controller
+                .value()
+                .selection()
+                .range(),
+            1..1
+        );
+        assert!(
+            space
+                .go_to_place(&place(&scratch.0.join("missing.rs"), 0, 0, 1), notify())
+                .is_err()
+        );
+        assert_eq!(
+            space.active_document().unwrap().path,
+            b,
+            "what is shown is as it was"
+        );
     }
 
     #[test]
@@ -467,7 +674,10 @@ mod tests {
         let scratch = Scratch::new("problems");
         let a = scratch.file("a.rs", "fn a() {}\n");
         let mut space = workspace(&scratch);
-        assert!(!space.problems_open, "a workspace begins with the panel shut");
+        assert!(
+            !space.problems_open,
+            "a workspace begins with the panel shut"
+        );
         space.open(&a, notify()).unwrap();
         assert!(!space.problems_open, "opening a file does not open it");
         space.toggle_problems();
@@ -488,36 +698,32 @@ mod tests {
     }
 
     #[test]
+    fn the_text_of_a_file_that_is_open_is_the_editors_with_its_changes_and_a_file_that_is_not_open_has_none() {
+        let scratch = Scratch::new("buffer-of");
+        let file = scratch.file("a.rs", "one\ntwo\n");
+        let closed = scratch.file("b.rs", "x\n");
+        let mut space = Workspace::new(scratch.0.clone());
+        space.open(&file, notify()).unwrap();
+        let document = space.active_document().expect("open").clone();
+        document.controller.replace_range(0..0, "zero\n");
+        let text = space.buffer_of(&file).expect("open");
+        assert_eq!(text.slice(0..text.len()).to_string(), "zero\none\ntwo\n", "what is not saved is in it");
+        assert!(space.buffer_of(&closed).is_none(), "a file that is not open is the disk's");
+    }
+
+    #[test]
     fn opening_a_file_shows_it_and_opening_it_again_shows_the_same_tab() {
         let scratch = Scratch::new("open");
         let a = scratch.file("a.rs", "a");
         let b = scratch.file("b.rs", "b");
         let mut space = workspace(&scratch);
-        space
-            .open(&a, notify())
-            .unwrap();
-        space
-            .open(&b, notify())
-            .unwrap();
+        space.open(&a, notify()).unwrap();
+        space.open(&b, notify()).unwrap();
         assert_eq!(space.documents.len(), 2);
-        assert_eq!(
-            space
-                .active_document()
-                .unwrap()
-                .name,
-            "b.rs"
-        );
-        space
-            .open(&a, notify())
-            .unwrap();
+        assert_eq!(space.active_document().unwrap().name, "b.rs");
+        space.open(&a, notify()).unwrap();
         assert_eq!(space.documents.len(), 2, "a is not opened twice");
-        assert_eq!(
-            space
-                .active_document()
-                .unwrap()
-                .name,
-            "a.rs"
-        );
+        assert_eq!(space.active_document().unwrap().name, "a.rs");
         assert_ne!(space.documents[0].id, space.documents[1].id);
     }
 
@@ -526,22 +732,14 @@ mod tests {
         let scratch = Scratch::new("openfail");
         let mut space = workspace(&scratch);
         let open = scratch.file("a.rs", "a");
-        space
-            .open(&open, notify())
-            .unwrap();
+        space.open(&open, notify()).unwrap();
         assert!(
             space
                 .open(&scratch.0.join("missing.rs"), notify())
                 .is_err()
         );
         assert_eq!(space.documents.len(), 1);
-        assert_eq!(
-            space
-                .active_document()
-                .unwrap()
-                .name,
-            "a.rs"
-        );
+        assert_eq!(space.active_document().unwrap().name, "a.rs");
         assert!(
             space
                 .message
@@ -550,9 +748,7 @@ mod tests {
             "{:?}",
             space.message
         );
-        space
-            .open(&open, notify())
-            .unwrap();
+        space.open(&open, notify()).unwrap();
         assert!(space.message.is_none(), "the next thing done clears it");
     }
 
@@ -562,9 +758,7 @@ mod tests {
         let mut space = workspace(&scratch);
         for name in ["a.rs", "b.rs", "c.rs"] {
             let path = scratch.file(name, name);
-            space
-                .open(&path, notify())
-                .unwrap();
+            space.open(&path, notify()).unwrap();
         }
         let ids: Vec<u64> = space
             .documents
@@ -582,11 +776,7 @@ mod tests {
         );
         space.close(ids[0]);
         assert_eq!(space.active, None);
-        assert!(
-            space
-                .active_document()
-                .is_none()
-        );
+        assert!(space.active_document().is_none());
         space.close(999);
     }
 
@@ -613,9 +803,7 @@ mod tests {
         space
             .open(&a, Rc::new(move || counted.set(counted.get() + 1)))
             .unwrap();
-        space
-            .open(&b, notify())
-            .unwrap();
+        space.open(&b, notify()).unwrap();
         assert!(
             !space
                 .documents
@@ -635,9 +823,7 @@ mod tests {
         );
         assert_eq!(changes.get(), 1, "the owner was told once");
 
-        space.documents[0]
-            .save()
-            .unwrap();
+        space.documents[0].save().unwrap();
         assert!(
             !space
                 .documents
@@ -651,11 +837,7 @@ mod tests {
         let scratch = Scratch::new("names");
         scratch.file(".git/HEAD", "ref: refs/heads/main\n");
         let space = workspace(&scratch);
-        assert!(
-            space
-                .name()
-                .starts_with("refractor-names")
-        );
+        assert!(space.name().starts_with("refractor-names"));
         assert_eq!(space.branch.as_deref(), Some("main"));
         assert_eq!(
             space.relative(&scratch.0.join("src/lib.rs")),
@@ -673,12 +855,8 @@ mod tests {
         let a = scratch.file("a.rs", "a");
         let b = scratch.file("b.rs", "b");
         let mut space = workspace(&scratch);
-        space
-            .open(&a, notify())
-            .unwrap();
-        space
-            .open(&b, notify())
-            .unwrap();
+        space.open(&a, notify()).unwrap();
+        space.open(&b, notify()).unwrap();
         let (first, second) = (space.documents[0].id, space.documents[1].id);
 
         space.request_close(second);
@@ -706,13 +884,35 @@ mod tests {
     }
 
     #[test]
+    fn what_was_found_of_a_file_that_something_else_changed_is_a_message_unless_it_is_what_nothing_needs_said_of() {
+        use crate::file_sync::Synced;
+        let scratch = Scratch::new("external");
+        let path = scratch.file("a.rs", "a");
+        let mut space = workspace(&scratch);
+        space.open(&path, notify()).unwrap();
+        let document = Rc::clone(&space.documents[0]);
+        space.message = Some("an old message".to_owned());
+        space.report_external(&document, &Synced::Same);
+        assert_eq!(space.message.as_deref(), Some("an old message"), "nothing found, nothing said");
+        space.report_external(&document, &Synced::Reloaded);
+        assert_eq!(space.message.as_deref(), Some("a.rs changed on disk and was reloaded"));
+        space.report_external(&document, &Synced::Conflict);
+        let said = space.message.clone().expect("a conflict is said");
+        assert!(said.starts_with("a.rs changed on disk, and so did you"), "{said}");
+        assert!(said.contains("save to overwrite") && said.contains("close"), "what can be done is said: {said}");
+        space.report_external(&document, &Synced::Deleted);
+        assert_eq!(space.message.as_deref(), Some("a.rs was deleted from disk: save to write it again"));
+        space.report_external(&document, &Synced::Failed("stream did not contain valid UTF-8".to_owned()));
+        assert_eq!(space.message.as_deref(), Some("a.rs changed on disk but could not be read: stream did not contain valid UTF-8"));
+        assert_eq!(space.closing, None);
+    }
+
+    #[test]
     fn how_a_save_went_is_a_message_only_when_it_went_wrong() {
         let scratch = Scratch::new("saving");
         let path = scratch.file("a.rs", "a");
         let mut space = workspace(&scratch);
-        space
-            .open(&path, notify())
-            .unwrap();
+        space.open(&path, notify()).unwrap();
         space.documents[0]
             .controller
             .set_text("saved text");
@@ -722,9 +922,7 @@ mod tests {
         assert!(space.message.is_none());
 
         space.message = Some("an old message".to_owned());
-        space.documents[0]
-            .controller
-            .set_text("more");
+        space.documents[0].controller.set_text("more");
         std::fs::remove_dir_all(&scratch.0).unwrap();
         let result = space.documents[0].save();
         space.report_save(&name, result);
@@ -756,9 +954,7 @@ mod tests {
         space
             .open(&path, Rc::new(move || counted.set(counted.get() + 1)))
             .unwrap();
-        space.documents[0]
-            .controller
-            .set_text("b");
+        space.documents[0].controller.set_text("b");
         let document = Rc::clone(&space.documents[0]);
         document.save().unwrap();
         assert_eq!(told.get(), 2, "changed, then unchanged");
@@ -790,39 +986,27 @@ mod tests {
         let folder = scratch.0.join("project");
         std::fs::create_dir_all(&folder).unwrap();
         let file = scratch.file("project/main.rs", "");
-        let built = scratch.0.clone();
+        let other = scratch.0.clone();
         let missing = PathBuf::from("/no/such/folder");
         // A folder named on the command line, or the folder a named file is in, wins.
         assert_eq!(
-            choose_root(
-                Some(folder.clone()),
-                Some(missing.clone()),
-                None,
-                &built,
-                None
-            ),
+            choose_root(Some(folder.clone()), Some(missing.clone()), None, None),
             folder
         );
-        assert_eq!(choose_root(Some(file), None, None, &built, None), folder);
+        assert_eq!(choose_root(Some(file), None, None, None), folder);
         // Then the variable; then where the app was started, unless that is the root of the disk.
         assert_eq!(
-            choose_root(
-                None,
-                Some(folder.clone()),
-                Some(built.clone()),
-                &built,
-                None
-            ),
+            choose_root(None, Some(folder.clone()), Some(other), None),
             folder
         );
         assert_eq!(
-            choose_root(None, None, Some(folder.clone()), &built, None),
+            choose_root(None, None, Some(folder.clone()), None),
             folder
         );
         assert_eq!(
-            choose_root(None, None, Some(PathBuf::from("/")), &folder, None),
+            choose_root(None, None, Some(PathBuf::from("/")), Some(folder.clone())),
             folder,
-            "an app started from the desktop starts at /"
+            "an app started from the desktop starts at /, and goes to home"
         );
         // What is not a folder is passed over, and with nothing left it is the folder it is in.
         assert_eq!(
@@ -830,14 +1014,95 @@ mod tests {
                 Some(missing.clone()),
                 Some(missing.clone()),
                 Some(missing),
-                &built,
                 Some(folder.clone())
             ),
-            built
+            folder
         );
         assert_eq!(
-            choose_root(None, None, None, Path::new("/no/such"), None),
+            choose_root(None, None, None, None),
             PathBuf::from(".")
+        );
+    }
+
+    #[test]
+    fn the_settings_tab_is_opened_once_shown_at_the_end_and_closed_without_asking() {
+        let scratch = Scratch::new("settings-tab");
+        let a = scratch.file("a.rs", "a");
+        let b = scratch.file("b.rs", "b");
+        let mut space = workspace(&scratch);
+        assert!(!space.settings_open, "a workspace begins without the tab");
+        space.open_settings();
+        assert!(
+            space.settings_open && space.settings_active(),
+            "it is shown at once"
+        );
+        assert!(
+            space.active_document().is_none(),
+            "and no document is the one being edited"
+        );
+        space.open(&a, notify()).unwrap();
+        assert!(!space.settings_active(), "opening a file shows the file");
+        space.open_settings();
+        space.open_settings();
+        assert!(
+            space.settings_active(),
+            "asking again shows the tab that is open"
+        );
+        space.open(&b, notify()).unwrap();
+        space.activate(Workspace::SETTINGS_TAB);
+        assert!(space.settings_active(), "a click on the tab shows it");
+        // Closing the tab shown goes to the tab before it, which is the last file.
+        space.request_close(Workspace::SETTINGS_TAB);
+        assert!(!space.settings_open);
+        assert_eq!(
+            space
+                .active_document()
+                .map(|document| document.path.clone()),
+            Some(b)
+        );
+        assert_eq!(space.documents.len(), 2, "the files stay open");
+    }
+
+    #[test]
+    fn closing_a_tab_that_is_not_shown_keeps_the_settings_tab_shown_and_the_tab_cannot_be_shown_when_closed()
+     {
+        let scratch = Scratch::new("settings-tab-closed");
+        let a = scratch.file("a.rs", "a");
+        let mut space = workspace(&scratch);
+        space.open(&a, notify()).unwrap();
+        let id = space.documents[0].id;
+        space.activate(Workspace::SETTINGS_TAB);
+        assert_eq!(space.active, Some(id), "there is no tab to show");
+        space.open_settings();
+        space.close(id);
+        assert!(
+            space.settings_active(),
+            "closing a file that is not shown changes nothing about what is"
+        );
+        space.close(Workspace::SETTINGS_TAB);
+        assert_eq!(space.active, None, "with nothing open nothing is shown");
+        space.close(Workspace::SETTINGS_TAB);
+        assert_eq!(space.active, None, "closing the tab again does nothing");
+    }
+
+    #[test]
+    fn a_file_closed_while_the_settings_tab_is_open_shows_the_file_beside_it() {
+        let scratch = Scratch::new("settings-tab-beside");
+        let a = scratch.file("a.rs", "a");
+        let b = scratch.file("b.rs", "b");
+        let mut space = workspace(&scratch);
+        space.open(&a, notify()).unwrap();
+        space.open(&b, notify()).unwrap();
+        space.open_settings();
+        let (first, second) = (space.documents[0].id, space.documents[1].id);
+        space.activate(second);
+        space.close(second);
+        assert_eq!(space.active, Some(first), "the file before the one closed");
+        space.activate(Workspace::SETTINGS_TAB);
+        space.close(first);
+        assert!(
+            space.settings_active(),
+            "the tab being shown is still shown"
         );
     }
 }

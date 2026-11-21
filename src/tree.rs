@@ -37,10 +37,7 @@ pub fn read_dir(dir: &Path) -> io::Result<Vec<Entry>> {
     let mut entries: Vec<Entry> = std::fs::read_dir(dir)?
         .filter_map(Result::ok)
         .filter_map(|entry| {
-            let name = entry
-                .file_name()
-                .to_string_lossy()
-                .into_owned();
+            let name = entry.file_name().to_string_lossy().into_owned();
             if HIDDEN.contains(&name.as_str()) {
                 return None;
             }

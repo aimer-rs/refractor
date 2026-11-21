@@ -6,6 +6,7 @@
 //! of the file is made to parse it. The editor asks for the styles of the lines it is about to draw,
 //! and only the captures of those lines are looked up.
 
+mod brackets;
 mod cache;
 mod palette;
 
@@ -15,8 +16,10 @@ use std::cell::RefCell;
 use std::ops::Range;
 use std::rc::Rc;
 
+use self::brackets::Brackets;
 use self::cache::{HighlightCache, clip};
 
+use aimer::MarkdownTheme;
 use aimer::input::input::{
     HighlightContext, SpanStyle, StyledRange, TextEmbedder, TextHighlighter, TextSnapshot,
 };
@@ -24,6 +27,7 @@ use arborium::tree_sitter::{
     InputEdit, Language, Node, Parser, Point, Query, QueryCursor, StreamingIterator, Tree,
 };
 
+pub use self::brackets::Pair;
 pub use self::palette::SyntaxPalette;
 
 /// The longest text that is highlighted, in bytes. A file past it is shown plain: parsing it whole
@@ -56,17 +60,14 @@ impl SyntaxHighlighter {
         parser
             .set_language(&language)
             .expect("the Rust grammar is one this tree-sitter reads");
-        let styles = query
-            .capture_names()
-            .iter()
-            .map(|name| palette.style_for(name))
-            .collect();
-        let docs = DocRenderer::new(crate::markdown::doc_theme());
+        let styles = capture_styles(&query, &palette);
+        let docs = DocRenderer::new(crate::markdown::doc_theme(crate::settings::ThemeMode::Dark));
         Self {
             engine: Rc::new(RefCell::new(Engine {
                 parser,
                 query,
                 styles,
+                palette,
                 tree: None,
                 text: TextSnapshot::new(),
                 incremental_parses: 0,
@@ -77,37 +78,94 @@ impl SyntaxHighlighter {
         }
     }
 
+    /// Colors the syntax with `palette` from now on. What was highlighted is dropped, so the next draw
+    /// asks again; the parse is kept, so nothing is parsed again. The same palette changes nothing.
+    pub fn set_palette(&self, palette: SyntaxPalette) {
+        let mut engine = self.engine.borrow_mut();
+        if engine.palette == palette {
+            return;
+        }
+        engine.styles = capture_styles(&engine.query, &palette);
+        engine.palette = palette;
+        engine.cache = None;
+    }
+
+    /// Measures the indent of the rendered doc comments in code of `size` logical pixels, which is the size the code
+    /// beside them is set in.
+    pub fn set_code_size(&self, size: f32) {
+        self.engine
+            .borrow_mut()
+            .docs
+            .set_code_size(size);
+    }
+
+    /// Limits the text of the rendered doc comments to `width` logical pixels, so a long line of comment
+    /// wraps to a readable column; `None` lets them take the width of the editor. See
+    /// [`DocRenderer::set_max_width`].
+    pub fn set_doc_max_width(&self, width: Option<f32>) {
+        self.engine
+            .borrow_mut()
+            .docs
+            .set_max_width(width);
+    }
+
+    /// Calls `handler` with the link when one in a rendered doc comment is clicked. See [`DocRenderer::set_on_link`].
+    pub fn set_doc_on_link(&self, handler: impl Fn(&crate::doc_comments::DocLink) + 'static) {
+        self.engine
+            .borrow_mut()
+            .docs
+            .set_on_link(handler);
+    }
+
+    /// Draws the rendered doc comments with `theme` from now on.
+    pub fn set_doc_theme(&self, theme: MarkdownTheme) {
+        self.engine.borrow_mut().docs.set_theme(theme);
+    }
+
     /// The highlighter to give a text area: it is asked for the styles of the lines being drawn, and
     /// parses what changed since it was last asked.
     pub fn highlighter(&self) -> TextHighlighter {
         let engine = Rc::clone(&self.engine);
         TextHighlighter::windowed(move |text, range, _context: &HighlightContext| {
-            engine
-                .borrow_mut()
-                .ranges(text, range)
+            engine.borrow_mut().ranges(text, range)
+        })
+    }
+
+    /// [`highlighter`](Self::highlighter) with what the grammar says of a part of the text given to `over`, with the text and the part,
+    /// to say what is drawn instead: where something that knows more of the names, a language server, draws over it.
+    ///
+    /// `over` runs whenever the grammar's runs of a part are asked for, so it is as cheap as it has to be for the lines on screen.
+    pub fn highlighter_over(
+        &self,
+        over: impl Fn(Vec<StyledRange>, &TextSnapshot, Range<usize>) -> Vec<StyledRange> + 'static,
+    ) -> TextHighlighter {
+        let engine = Rc::clone(&self.engine);
+        TextHighlighter::windowed(move |text, range, _context: &HighlightContext| {
+            let runs = engine.borrow_mut().ranges(text, range.clone());
+            over(runs, text, range)
         })
     }
 
     /// Whether line `line` starts a doc comment, and if it does, whether the block is rendered
     /// (`Some(true)`) or shown as written: the state the button in the margin shows.
     pub fn doc_block_at(&self, text: &TextSnapshot, line: usize) -> Option<bool> {
-        doc_comments::is_block_start(text, line).then(|| self.engine.borrow().docs.is_rendered(line))
+        doc_comments::is_block_start(text, line)
+            .then(|| self.engine.borrow().docs.is_rendered(line))
     }
 
     /// Whether line `line` of `text` is the first line of a rendered doc comment, the one line of it that
     /// is on screen: how many bytes of indent it has, which is where its bar goes. `None` for a line
     /// that is not.
     pub fn doc_bar(&self, text: &TextSnapshot, line: usize) -> Option<usize> {
-        self.engine
-            .borrow()
-            .docs
-            .bar_indent(text, line)
+        self.engine.borrow().docs.bar_indent(text, line)
     }
 
     /// The embedder that draws the rendered doc comments: each block as its markdown.
     pub fn doc_embedder(&self) -> TextEmbedder {
         let engine = Rc::clone(&self.engine);
-        TextEmbedder::windowed(move |text, range, _context| engine.borrow().docs.embeds(text, range))
+        TextEmbedder::windowed(move |text, range, _context| {
+            engine.borrow().docs.embeds(text, range)
+        })
     }
 
     /// Whether an edit that removes the bytes `removed` of `text` (inserts at its start, when it is
@@ -121,7 +179,12 @@ impl SyntaxHighlighter {
 
     /// Whether Backspace (`backwards`) or Delete with the selection `selection` would change a
     /// rendered doc comment; see [`DocRenderer::refuses_deletion`].
-    pub fn refuses_deletion(&self, text: &TextSnapshot, selection: Range<usize>, backwards: bool) -> bool {
+    pub fn refuses_deletion(
+        &self,
+        text: &TextSnapshot,
+        selection: Range<usize>,
+        backwards: bool,
+    ) -> bool {
         self.engine
             .borrow()
             .docs
@@ -131,36 +194,51 @@ impl SyntaxHighlighter {
     /// Shows the doc comment that starts on `line` as written if it is rendered, and rendered if it is
     /// written.
     pub fn toggle_doc_block(&self, line: usize) {
-        self.engine
-            .borrow_mut()
-            .docs
-            .toggle(line);
+        self.engine.borrow_mut().docs.toggle(line);
     }
 
     /// The name of the item the byte `at` is inside of, for a breadcrumb: the innermost function,
     /// type, trait, module or `impl` that holds it, as `impl Trait for Type`, `fn name`, and so on.
     /// `None` outside every item.
     pub fn symbol_at(&self, text: &TextSnapshot, at: usize) -> Option<String> {
-        self.engine
-            .borrow_mut()
-            .symbol_at(text, at)
+        self.engine.borrow_mut().symbol_at(text, at)
     }
 
     /// The bytes of the name the byte `at` is in, when it is a name that something is defined as and used by: an
     /// identifier, a type, a field. `None` for a comment, a string, a raw string, a keyword, a number, and for what is
     /// beside the name. It is what the jump key shows as a link.
     pub fn link_at(&self, text: &TextSnapshot, at: usize) -> Option<Range<usize>> {
+        self.engine.borrow_mut().link_at(text, at)
+    }
+
+    /// The pair of brackets that the caret at `at` is beside, as the parse of `text` has it: a bracket before it, or else
+    /// one after it. `None` where it is beside none, or where the text is not parsed.
+    pub fn pair_beside(&self, text: &TextSnapshot, at: usize) -> Option<Pair> {
         self.engine
             .borrow_mut()
-            .link_at(text, at)
+            .with_tree(text, |tree| Brackets::adjacent(tree, at.min(text.len())))
+    }
+
+    /// The innermost pair of brackets that holds the caret at `at`.
+    pub fn pair_around(&self, text: &TextSnapshot, at: usize) -> Option<Pair> {
+        self.engine
+            .borrow_mut()
+            .with_tree(text, |tree| Brackets::enclosing(tree, at.min(text.len())))
+    }
+
+    /// The styled ranges of a line of code that is shown on its own, such as one of the lines that use a name. It is parsed as it
+    /// is, and so is a fragment where the line is: the colors are those of what the parse makes of it. Use a highlighter of its
+    /// own for this and not a document's, whose parse each line would replace.
+    pub fn snippet(&self, text: &str) -> Vec<StyledRange> {
+        let text = TextSnapshot::from_text(text);
+        let len = text.len();
+        self.engine.borrow_mut().ranges(&text, 0..len)
     }
 
     /// The styled ranges of `range` of `text`, with nothing focused.
     #[cfg(test)]
     pub fn ranges(&self, text: &TextSnapshot, range: Range<usize>) -> Vec<StyledRange> {
-        self.engine
-            .borrow_mut()
-            .ranges(text, range)
+        self.engine.borrow_mut().ranges(text, range)
     }
 
     /// The styled ranges of `range` as a query of it gives them, without the kept highlight.
@@ -170,7 +248,7 @@ impl SyntaxHighlighter {
         engine.sync(text);
         let range = range.start.min(text.len())..range.end.min(text.len());
         let found = engine.query(text, range.clone());
-        clip(found, &range)
+        engine.rainbowed(clip(found, &range), range)
     }
 
     /// How many bytes of the text tree-sitter was asked about.
@@ -182,10 +260,17 @@ impl SyntaxHighlighter {
     /// How many times the tree was made again from the one before it, and not from scratch.
     #[cfg(test)]
     fn incremental_parses(&self) -> usize {
-        self.engine
-            .borrow()
-            .incremental_parses
+        self.engine.borrow().incremental_parses
     }
+}
+
+/// The style `palette` gives each capture of `query`, by the index of the capture.
+fn capture_styles(query: &Query, palette: &SyntaxPalette) -> Vec<Option<SpanStyle>> {
+    query
+        .capture_names()
+        .iter()
+        .map(|name| palette.style_for(name))
+        .collect()
 }
 
 struct Engine {
@@ -193,6 +278,8 @@ struct Engine {
     query: Query,
     /// The style of each capture of the query, by its index; `None` leaves the text plain.
     styles: Vec<Option<SpanStyle>>,
+    /// The palette `styles` were made from.
+    palette: SyntaxPalette,
     tree: Option<Tree>,
     /// The text `tree` is the parse of.
     text: TextSnapshot,
@@ -232,9 +319,36 @@ impl Engine {
             return Vec::new();
         }
         self.cover(text, &range);
-        self.cache
+        let kept = self
+            .cache
             .as_ref()
-            .map_or_else(Vec::new, |cache| cache.ranges_in(range))
+            .map_or_else(Vec::new, |cache| cache.ranges_in(range.clone()));
+        self.rainbowed(kept, range)
+    }
+
+    /// `ranges`, the runs of `region`, with the brackets in it in the colors of their depth.
+    ///
+    /// How deep a bracket is depends on the brackets around it, which an edit far from it can change, so the colors are not
+    /// kept with the runs: they are made from the tree as it is, for the part that is asked about.
+    fn rainbowed(&self, ranges: Vec<StyledRange>, region: Range<usize>) -> Vec<StyledRange> {
+        let Some(tree) = &self.tree else {
+            return ranges;
+        };
+        // A run that reaches out of `region` may be several brackets, which are one run while they are the same color: they
+        // are told apart over the whole of it, and the pieces that are not in `region` are dropped after.
+        let reach = ranges
+            .first()
+            .map_or(region.start, |run| run.range.start.min(region.start))
+            ..ranges
+                .last()
+                .map_or(region.end, |run| run.range.end.max(region.end));
+        let brackets: Vec<(Range<usize>, SpanStyle)> = Brackets::depths(tree, reach)
+            .into_iter()
+            .map(|(range, depth)| (range, SpanStyle::new().color(self.palette.rainbow(depth))))
+            .collect();
+        let mut ranges = with_brackets(ranges, brackets);
+        ranges.retain(|run| run.range.start < region.end && run.range.end > region.start);
+        ranges
     }
 
     /// Makes the kept highlight cover `range`: asks about the parts of it that it does not.
@@ -294,10 +408,7 @@ impl Engine {
         });
         while let Some((matched, index)) = captures.next() {
             let capture = matched.captures[*index];
-            if let Some(Some(style)) = self
-                .styles
-                .get(capture.index as usize)
-            {
+            if let Some(Some(style)) = self.styles.get(capture.index as usize) {
                 found.push(Capture {
                     range: capture.node.start_byte()..capture.node.end_byte(),
                     style: style.clone(),
@@ -312,7 +423,13 @@ impl Engine {
     /// one replaced by `new` of this, and asks again about what the edit can have changed: the lines it
     /// touched and the next to them, and the parts of the tree that changed shape, which an edit that
     /// opens a string or a comment reaches far from itself.
-    fn keep_cache_over(&mut self, text: &TextSnapshot, old: Range<usize>, new: Range<usize>, changed: Vec<Range<usize>>) {
+    fn keep_cache_over(
+        &mut self,
+        text: &TextSnapshot,
+        old: Range<usize>,
+        new: Range<usize>,
+        changed: Vec<Range<usize>>,
+    ) {
         let Some(mut cache) = self.cache.take() else {
             return;
         };
@@ -327,8 +444,10 @@ impl Engine {
             let start = dirty.start.min(text.len());
             let end = dirty.end.min(text.len()).max(start);
             let first = text.byte_to_line(start).saturating_sub(1);
-            let last = (text.byte_to_line(if end > start { end - 1 } else { start }) + 1).min(last_line);
-            let region = text.line_range(first).start.max(covered.start)..text.line_range(last).end.min(covered.end);
+            let last =
+                (text.byte_to_line(if end > start { end - 1 } else { start }) + 1).min(last_line);
+            let region = text.line_range(first).start.max(covered.start)
+                ..text.line_range(last).end.min(covered.end);
             if region.start < region.end {
                 regions.push(region);
             }
@@ -346,6 +465,19 @@ impl Engine {
             cache.replace(region, fresh);
         }
         self.cache = Some(cache);
+    }
+
+    /// Reads the parse of `text`, made current first: `None` for a text that is not parsed.
+    fn with_tree<T>(
+        &mut self,
+        text: &TextSnapshot,
+        read: impl FnOnce(&Tree) -> Option<T>,
+    ) -> Option<T> {
+        if text.len() > MAX_HIGHLIGHTED_BYTES {
+            return None;
+        }
+        self.sync(text);
+        read(self.tree.as_ref()?)
     }
 
     fn symbol_at(&mut self, text: &TextSnapshot, at: usize) -> Option<String> {
@@ -378,8 +510,11 @@ impl Engine {
             .descendant_for_byte_range(at, at + 1)?;
         // The leaf the byte is in, and only the kinds of leaf that name something. A string and a comment are leaves of
         // their own kinds, and a keyword has no named kind at all, so none of them is in this list.
-        matches!(node.kind(), "identifier" | "type_identifier" | "field_identifier" | "shorthand_field_identifier")
-            .then(|| node.byte_range())
+        matches!(
+            node.kind(),
+            "identifier" | "type_identifier" | "field_identifier" | "shorthand_field_identifier"
+        )
+        .then(|| node.byte_range())
     }
 
     /// Makes the tree the parse of `text`: from the tree of the text before it, told what changed,
@@ -398,7 +533,11 @@ impl Engine {
             (Some((old, new)), Some(tree)) => {
                 // The blocks shown as written stay on their lines: lines were added or taken out.
                 let line = self.text.byte_to_line(old.start);
-                let removed = self.text.slice(old.clone()).matches('\n').count();
+                let removed = self
+                    .text
+                    .slice(old.clone())
+                    .matches('\n')
+                    .count();
                 let inserted = text.slice(new.clone()).matches('\n').count();
                 self.docs.edited(line, removed, inserted);
                 tree.edit(&InputEdit {
@@ -416,10 +555,7 @@ impl Engine {
         }
         let previous = if reuse { self.tree.as_ref() } else { None };
         let parsed = self.parser.parse_with_options(
-            &mut |byte, _| {
-                text.bytes_from(byte)
-                    .unwrap_or(&[])
-            },
+            &mut |byte, _| text.bytes_from(byte).unwrap_or(&[]),
             previous,
             None,
         );
@@ -437,7 +573,9 @@ impl Engine {
         self.tree = parsed;
         self.text = text.clone();
         match edit {
-            Some((old, new)) if reuse && self.tree.is_some() => self.keep_cache_over(text, old, new, changed),
+            Some((old, new)) if reuse && self.tree.is_some() => {
+                self.keep_cache_over(text, old, new, changed)
+            }
             // A tree made from nothing says nothing of what the old one held.
             _ => self.cache = None,
         }
@@ -520,6 +658,46 @@ fn flatten(mut captures: Vec<Capture>) -> Vec<StyledRange> {
             Some(last) if last.range.end == start && last.style == *style => last.range.end = end,
             _ => out.push(StyledRange::new(start..end, style.clone())),
         }
+    }
+    out
+}
+
+/// `ranges`, which are in order and do not overlap, with each of `brackets`, which are too, as a run of its own: a run that
+/// has one in it is cut round it, and one that is in no run is a run by itself.
+fn with_brackets(
+    ranges: Vec<StyledRange>,
+    brackets: Vec<(Range<usize>, SpanStyle)>,
+) -> Vec<StyledRange> {
+    if brackets.is_empty() {
+        return ranges;
+    }
+    let mut out: Vec<StyledRange> = Vec::with_capacity(ranges.len() + brackets.len() * 2);
+    let mut next = 0;
+    for run in ranges {
+        let mut start = run.range.start;
+        // Brackets that lie before the run are in no run.
+        while next < brackets.len() && brackets[next].0.end <= start {
+            out.push(StyledRange::new(
+                brackets[next].0.clone(),
+                brackets[next].1.clone(),
+            ));
+            next += 1;
+        }
+        while next < brackets.len() && brackets[next].0.start < run.range.end {
+            let (bracket, style) = &brackets[next];
+            if bracket.start > start {
+                out.push(StyledRange::new(start..bracket.start, run.style.clone()));
+            }
+            out.push(StyledRange::new(bracket.clone(), style.clone()));
+            start = bracket.end.min(run.range.end);
+            next += 1;
+        }
+        if start < run.range.end {
+            out.push(StyledRange::new(start..run.range.end, run.style.clone()));
+        }
+    }
+    for (bracket, style) in &brackets[next..] {
+        out.push(StyledRange::new(bracket.clone(), style.clone()));
     }
     out
 }

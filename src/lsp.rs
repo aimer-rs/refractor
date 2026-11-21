@@ -7,18 +7,31 @@
 
 mod client;
 mod core;
+mod diagnostics;
+mod fix;
+#[cfg(test)]
+pub(crate) mod fake;
+mod inlay;
 mod items;
+mod lens;
+mod locate;
 mod position;
 mod problems;
 mod process;
 mod protocol;
+mod semantic;
 mod session;
+mod symbols;
 mod transport;
 
 pub use self::client::Lsp;
 pub use self::core::Summary;
-pub use self::session::Status;
-pub use self::problems::{Problem, Weight};
-pub use self::items::{Answer, Edit, Item};
+pub use self::fix::CodeFix;
+pub use self::inlay::Hint;
+pub use self::semantic::{SemanticToken, SemanticTokens};
+pub use self::items::{Answer, Edit, Hover, Item};
+pub use self::lens::{Lens, LensLoad};
 pub use self::position::Position;
-pub use self::protocol::{ItemKind, Place};
+pub use self::problems::{Problem, Weight};
+pub use self::protocol::{HintKind, ItemKind, Legend, Severity, Place, Symbol, SymbolKind};
+pub use self::session::{Diagnostic, Status};

@@ -31,8 +31,13 @@ impl HighlightCache {
         if range.is_empty() {
             return Vec::new();
         }
-        let first = self.ranges.partition_point(|run| run.range.end <= range.start);
-        let last = self.ranges.partition_point(|run| run.range.start < range.end).max(first);
+        let first = self
+            .ranges
+            .partition_point(|run| run.range.end <= range.start);
+        let last = self
+            .ranges
+            .partition_point(|run| run.range.start < range.end)
+            .max(first);
         self.ranges[first..last].to_vec()
     }
 
@@ -65,15 +70,26 @@ impl HighlightCache {
         self.covered = start..end.max(start);
 
         // The runs the edit overlaps keep their parts before it and after it.
-        let first = self.ranges.partition_point(|run| run.range.end <= old.start);
-        let after = self.ranges.partition_point(|run| run.range.start < old.end).max(first);
+        let first = self
+            .ranges
+            .partition_point(|run| run.range.end <= old.start);
+        let after = self
+            .ranges
+            .partition_point(|run| run.range.start < old.end)
+            .max(first);
         let mut kept = Vec::new();
         for run in &self.ranges[first..after] {
             if run.range.start < old.start {
-                kept.push(StyledRange::new(run.range.start..old.start, run.style.clone()));
+                kept.push(StyledRange::new(
+                    run.range.start..old.start,
+                    run.style.clone(),
+                ));
             }
             if run.range.end > old.end {
-                kept.push(StyledRange::new(new_end..moved(run.range.end), run.style.clone()));
+                kept.push(StyledRange::new(
+                    new_end..moved(run.range.end),
+                    run.style.clone(),
+                ));
             }
         }
         let moved_from = first + kept.len();
@@ -86,15 +102,23 @@ impl HighlightCache {
     /// Makes `fresh`, the runs of `region` and inside it, what the cache holds of `region`, which lies
     /// inside what it covers.
     pub fn replace(&mut self, region: Range<usize>, fresh: Vec<StyledRange>) {
-        let first = self.ranges.partition_point(|run| run.range.end <= region.start);
-        let last = self.ranges.partition_point(|run| run.range.start < region.end).max(first);
+        let first = self
+            .ranges
+            .partition_point(|run| run.range.end <= region.start);
+        let last = self
+            .ranges
+            .partition_point(|run| run.range.start < region.end)
+            .max(first);
         let mut middle = Vec::with_capacity(fresh.len() + 2);
         // The parts of the runs at the two edges that lie outside the region stay.
         let mut left = 0;
         if first < last {
             let run = &self.ranges[first];
             if run.range.start < region.start {
-                middle.push(StyledRange::new(run.range.start..region.start, run.style.clone()));
+                middle.push(StyledRange::new(
+                    run.range.start..region.start,
+                    run.style.clone(),
+                ));
                 left = 1;
             }
         }
@@ -103,7 +127,10 @@ impl HighlightCache {
         if first < last {
             let run = &self.ranges[last - 1];
             if run.range.end > region.end {
-                middle.push(StyledRange::new(region.end..run.range.end, run.style.clone()));
+                middle.push(StyledRange::new(
+                    region.end..run.range.end,
+                    run.style.clone(),
+                ));
             }
         }
         let added = middle.len();
@@ -176,7 +203,12 @@ mod tests {
         // 0..10 a, 10..20 b, 25..30 a (20..25 has no style), 30..40 c.
         HighlightCache::new(
             0..40,
-            vec![run(0..10, 1), run(10..20, 2), run(25..30, 1), run(30..40, 3)],
+            vec![
+                run(0..10, 1),
+                run(10..20, 2),
+                run(25..30, 1),
+                run(30..40, 3),
+            ],
         )
     }
 
@@ -196,11 +228,29 @@ mod tests {
     #[test]
     fn the_runs_of_a_range_are_those_with_a_byte_in_it_and_are_not_cut() {
         let cache = cache();
-        let ranges = |range: Range<usize>| cache.ranges_in(range).into_iter().map(|run| run.range).collect::<Vec<_>>();
-        assert_eq!(ranges(12..14), vec![10..20], "a run that holds the range is given whole");
+        let ranges = |range: Range<usize>| {
+            cache
+                .ranges_in(range)
+                .into_iter()
+                .map(|run| run.range)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            ranges(12..14),
+            vec![10..20],
+            "a run that holds the range is given whole"
+        );
         assert_eq!(ranges(15..27), vec![10..20, 25..30]);
-        assert_eq!(ranges(20..25), Vec::<Range<usize>>::new(), "a gap between runs has none");
-        assert_eq!(ranges(10..10), Vec::<Range<usize>>::new(), "nor does a range of no bytes");
+        assert_eq!(
+            ranges(20..25),
+            Vec::<Range<usize>>::new(),
+            "a gap between runs has none"
+        );
+        assert_eq!(
+            ranges(10..10),
+            Vec::<Range<usize>>::new(),
+            "nor does a range of no bytes"
+        );
         assert_eq!(ranges(0..40).len(), 4);
         assert_eq!(cache.covered(), 0..40);
     }
@@ -212,14 +262,24 @@ mod tests {
         cache.edited(12..16, 3);
         assert_eq!(
             held(&cache),
-            vec![(0..10, 1), (10..12, 2), (15..19, 2), (24..29, 1), (29..39, 3)],
+            vec![
+                (0..10, 1),
+                (10..12, 2),
+                (15..19, 2),
+                (24..29, 1),
+                (29..39, 3)
+            ],
             "the run through the edit is cut at it, and the rest is moved by one byte"
         );
         assert_eq!(cache.covered(), 0..39);
 
         let mut cache = self::cache();
         cache.edited(22..22, 5);
-        assert_eq!(held(&cache), vec![(0..10, 1), (10..20, 2), (30..35, 1), (35..45, 3)], "an insertion in a gap pushes what is after it");
+        assert_eq!(
+            held(&cache),
+            vec![(0..10, 1), (10..20, 2), (30..35, 1), (35..45, 3)],
+            "an insertion in a gap pushes what is after it"
+        );
         assert_eq!(cache.covered(), 0..45);
 
         let mut cache = self::cache();
@@ -232,9 +292,15 @@ mod tests {
     fn an_edit_past_what_is_covered_changes_nothing_and_one_before_it_moves_it() {
         let mut cache = HighlightCache::new(10..30, vec![run(10..20, 1), run(20..30, 2)]);
         cache.edited(40..41, 9);
-        assert_eq!((cache.covered(), held(&cache)), (10..30, vec![(10..20, 1), (20..30, 2)]));
+        assert_eq!(
+            (cache.covered(), held(&cache)),
+            (10..30, vec![(10..20, 1), (20..30, 2)])
+        );
         cache.edited(0..2, 5);
-        assert_eq!((cache.covered(), held(&cache)), (13..33, vec![(13..23, 1), (23..33, 2)]));
+        assert_eq!(
+            (cache.covered(), held(&cache)),
+            (13..33, vec![(13..23, 1), (23..33, 2)])
+        );
     }
 
     #[test]
@@ -242,28 +308,61 @@ mod tests {
         let mut cache = cache();
         // 10..20 is b; make 12..18 a, which leaves b on both sides, and then make it b again.
         cache.replace(12..18, vec![run(12..18, 1)]);
-        assert_eq!(held(&cache), vec![(0..10, 1), (10..12, 2), (12..18, 1), (18..20, 2), (25..30, 1), (30..40, 3)]);
+        assert_eq!(
+            held(&cache),
+            vec![
+                (0..10, 1),
+                (10..12, 2),
+                (12..18, 1),
+                (18..20, 2),
+                (25..30, 1),
+                (30..40, 3)
+            ]
+        );
         cache.replace(12..18, vec![run(12..18, 2)]);
-        assert_eq!(held(&cache), vec![(0..10, 1), (10..20, 2), (25..30, 1), (30..40, 3)], "one run again, as a query of it would give");
+        assert_eq!(
+            held(&cache),
+            vec![(0..10, 1), (10..20, 2), (25..30, 1), (30..40, 3)],
+            "one run again, as a query of it would give"
+        );
         // A region that starts a run: the one before it, of the same style, takes it in.
         cache.replace(20..25, vec![run(20..25, 2)]);
-        assert_eq!(held(&cache), vec![(0..10, 1), (10..25, 2), (25..30, 1), (30..40, 3)]);
+        assert_eq!(
+            held(&cache),
+            vec![(0..10, 1), (10..25, 2), (25..30, 1), (30..40, 3)]
+        );
         cache.replace(20..30, vec![run(20..30, 1)]);
-        assert_eq!(held(&cache), vec![(0..10, 1), (10..20, 2), (20..30, 1), (30..40, 3)]);
+        assert_eq!(
+            held(&cache),
+            vec![(0..10, 1), (10..20, 2), (20..30, 1), (30..40, 3)]
+        );
         cache.replace(0..40, vec![]);
-        assert!(held(&cache).is_empty(), "a region with nothing in it empties what was there");
+        assert!(
+            held(&cache).is_empty(),
+            "a region with nothing in it empties what was there"
+        );
     }
 
     #[test]
     fn the_part_of_a_run_that_a_region_cuts_is_joined_to_the_fresh_run_of_its_style() {
         // A run of one style through the start of the region, and fresh runs of that style at it.
-        let mut cache = HighlightCache::new(0..40, vec![run(0..10, 1), run(10..30, 2), run(30..40, 3)]);
+        let mut cache =
+            HighlightCache::new(0..40, vec![run(0..10, 1), run(10..30, 2), run(30..40, 3)]);
         cache.replace(20..35, vec![run(20..27, 2), run(27..35, 4)]);
-        assert_eq!(held(&cache), vec![(0..10, 1), (10..27, 2), (27..35, 4), (35..40, 3)], "left of the region, the old run goes on into the fresh one");
+        assert_eq!(
+            held(&cache),
+            vec![(0..10, 1), (10..27, 2), (27..35, 4), (35..40, 3)],
+            "left of the region, the old run goes on into the fresh one"
+        );
         // The same at the end of the region.
-        let mut cache = HighlightCache::new(0..40, vec![run(0..10, 1), run(10..30, 2), run(30..40, 3)]);
+        let mut cache =
+            HighlightCache::new(0..40, vec![run(0..10, 1), run(10..30, 2), run(30..40, 3)]);
         cache.replace(5..20, vec![run(5..8, 4), run(8..20, 2)]);
-        assert_eq!(held(&cache), vec![(0..5, 1), (5..8, 4), (8..30, 2), (30..40, 3)], "right of the region, the fresh run goes on into the old one");
+        assert_eq!(
+            held(&cache),
+            vec![(0..5, 1), (5..8, 4), (8..30, 2), (30..40, 3)],
+            "right of the region, the fresh run goes on into the old one"
+        );
         // A run that holds the whole region, replaced by the same style.
         let mut cache = HighlightCache::new(0..40, vec![run(0..40, 2)]);
         cache.replace(10..20, vec![run(10..20, 2)]);
@@ -281,20 +380,39 @@ mod tests {
     fn the_cache_grows_at_either_end_and_joins_what_it_adds() {
         let mut cache = HighlightCache::new(10..20, vec![run(10..20, 1)]);
         cache.extend(20..30, vec![run(20..25, 1), run(25..30, 2)]);
-        assert_eq!((cache.covered(), held(&cache)), (10..30, vec![(10..25, 1), (25..30, 2)]));
+        assert_eq!(
+            (cache.covered(), held(&cache)),
+            (10..30, vec![(10..25, 1), (25..30, 2)])
+        );
         cache.extend(0..10, vec![run(2..10, 1)]);
-        assert_eq!((cache.covered(), held(&cache)), (0..30, vec![(2..25, 1), (25..30, 2)]));
+        assert_eq!(
+            (cache.covered(), held(&cache)),
+            (0..30, vec![(2..25, 1), (25..30, 2)])
+        );
         cache.extend(5..35, vec![run(30..35, 2)]);
-        assert_eq!((cache.covered(), held(&cache)), (0..35, vec![(2..25, 1), (25..35, 2)]), "a region that overlaps what is covered adds only what is not");
+        assert_eq!(
+            (cache.covered(), held(&cache)),
+            (0..35, vec![(2..25, 1), (25..35, 2)]),
+            "a region that overlaps what is covered adds only what is not"
+        );
     }
 
     #[test]
     fn clipping_cuts_the_runs_at_the_edges_of_a_region() {
-        let clipped = clip(vec![run(0..10, 1), run(10..20, 2), run(25..30, 1)], &(5..27));
+        let clipped = clip(
+            vec![run(0..10, 1), run(10..20, 2), run(25..30, 1)],
+            &(5..27),
+        );
         assert_eq!(
-            clipped.into_iter().map(|run| run.range).collect::<Vec<_>>(),
+            clipped
+                .into_iter()
+                .map(|run| run.range)
+                .collect::<Vec<_>>(),
             vec![5..10, 10..20, 25..27]
         );
-        assert!(clip(vec![run(0..4, 1)], &(4..9)).is_empty(), "a run that ends where the region starts is outside it");
+        assert!(
+            clip(vec![run(0..4, 1)], &(4..9)).is_empty(),
+            "a run that ends where the region starts is outside it"
+        );
     }
 }

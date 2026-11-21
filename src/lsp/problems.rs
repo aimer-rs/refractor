@@ -26,6 +26,13 @@ impl From<Severity> for Weight {
     }
 }
 
+impl super::session::Diagnostic {
+    /// How much it weighs.
+    pub fn weight(&self) -> Weight {
+        self.severity.into()
+    }
+}
+
 /// One problem of a file.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Problem {
@@ -84,8 +91,18 @@ mod tests {
         TextEditingValue::new(text, aimer::input::TextSelection::collapsed(0), None)
     }
 
-    fn diagnostic(range: std::ops::Range<usize>, severity: Severity, message: &str, code: Option<&str>) -> Diagnostic {
-        Diagnostic { range, severity, message: message.to_owned(), code: code.map(str::to_owned) }
+    fn diagnostic(
+        range: std::ops::Range<usize>,
+        severity: Severity,
+        message: &str,
+        code: Option<&str>,
+    ) -> Diagnostic {
+        Diagnostic {
+            range,
+            severity,
+            message: message.to_owned(),
+            code: code.map(str::to_owned),
+        }
     }
 
     #[test]
@@ -94,7 +111,10 @@ mod tests {
         assert_eq!(Weight::from(Severity::Warning), Weight::Warning);
         assert_eq!(Weight::from(Severity::Information), Weight::Weak);
         assert_eq!(Weight::from(Severity::Hint), Weight::Weak);
-        assert!(Weight::Error < Weight::Warning && Weight::Warning < Weight::Weak, "the worst sorts first");
+        assert!(
+            Weight::Error < Weight::Warning && Weight::Warning < Weight::Weak,
+            "the worst sorts first"
+        );
     }
 
     #[test]
@@ -103,14 +123,32 @@ mod tests {
         let at = |needle: &str| text.find(needle).unwrap();
         let diagnostics = [
             diagnostic(at("two")..at("two") + 3, Severity::Hint, "hint late", None),
-            diagnostic(at("one")..at("one") + 3, Severity::Warning, "warning middle", Some("W1")),
-            diagnostic(at("three")..at("three") + 5, Severity::Error, "error last", Some("E0425")),
+            diagnostic(
+                at("one")..at("one") + 3,
+                Severity::Warning,
+                "warning middle",
+                Some("W1"),
+            ),
+            diagnostic(
+                at("three")..at("three") + 5,
+                Severity::Error,
+                "error last",
+                Some("E0425"),
+            ),
             diagnostic(0..4, Severity::Information, "info first", None),
-            diagnostic(at("zero")..at("zero") + 4, Severity::Error, "error first", None),
+            diagnostic(
+                at("zero")..at("zero") + 4,
+                Severity::Error,
+                "error first",
+                None,
+            ),
             diagnostic(0..4, Severity::Warning, "warning first", None),
         ];
         let problems = problems_of(&diagnostics, &value(text));
-        let order: Vec<(Weight, &str)> = problems.iter().map(|problem| (problem.weight, problem.message.as_str())).collect();
+        let order: Vec<(Weight, &str)> = problems
+            .iter()
+            .map(|problem| (problem.weight, problem.message.as_str()))
+            .collect();
         assert_eq!(
             order,
             vec![
@@ -131,7 +169,10 @@ mod tests {
             diagnostic(2..3, Severity::Error, "a", None),
             diagnostic(2..3, Severity::Error, "c", None),
         ];
-        let messages: Vec<String> = problems_of(&diagnostics, &value("abcdef")).into_iter().map(|problem| problem.message).collect();
+        let messages: Vec<String> = problems_of(&diagnostics, &value("abcdef"))
+            .into_iter()
+            .map(|problem| problem.message)
+            .collect();
         assert_eq!(messages, ["a", "b", "c"]);
     }
 
@@ -140,29 +181,67 @@ mod tests {
         // The second line begins with "é" (two bytes), a letter with a combining mark (two characters, one grapheme) and an emoji.
         let text = "first\n\u{e9}e\u{301}\u{1f600}X\r\nthird";
         let x = text.find('X').unwrap();
-        let problems = problems_of(&[diagnostic(x..x + 1, Severity::Error, "here", None)], &value(text));
-        assert_eq!((problems[0].line, problems[0].column), (2, 4), "after three graphemes on the second line");
+        let problems = problems_of(
+            &[diagnostic(x..x + 1, Severity::Error, "here", None)],
+            &value(text),
+        );
+        assert_eq!(
+            (problems[0].line, problems[0].column),
+            (2, 4),
+            "after three graphemes on the second line"
+        );
         assert_eq!(problems[0].at, x);
-        let first = problems_of(&[diagnostic(0..1, Severity::Warning, "start", None)], &value(text));
+        let first = problems_of(
+            &[diagnostic(0..1, Severity::Warning, "start", None)],
+            &value(text),
+        );
         assert_eq!((first[0].line, first[0].column, first[0].at), (1, 1, 0));
         let third = text.find("third").unwrap();
-        let last = problems_of(&[diagnostic(third + 5..third + 5, Severity::Warning, "end of the text", None)], &value(text));
-        assert_eq!((last[0].line, last[0].column), (3, 6), "a problem that is a point at the very end");
+        let last = problems_of(
+            &[diagnostic(
+                third + 5..third + 5,
+                Severity::Warning,
+                "end of the text",
+                None,
+            )],
+            &value(text),
+        );
+        assert_eq!(
+            (last[0].line, last[0].column),
+            (3, 6),
+            "a problem that is a point at the very end"
+        );
     }
 
     #[test]
     fn a_problem_in_empty_text_is_at_the_start() {
-        let problems = problems_of(&[diagnostic(0..0, Severity::Error, "empty", None)], &value(""));
-        assert_eq!((problems[0].line, problems[0].column, problems[0].at), (1, 1, 0));
+        let problems = problems_of(
+            &[diagnostic(0..0, Severity::Error, "empty", None)],
+            &value(""),
+        );
+        assert_eq!(
+            (problems[0].line, problems[0].column, problems[0].at),
+            (1, 1, 0)
+        );
         assert!(problems_of(&[], &value("anything")).is_empty());
     }
 
     #[test]
     fn the_headline_is_the_first_line_that_says_something() {
-        let make = |message: &str| Problem { weight: Weight::Error, message: message.to_owned(), code: None, line: 1, column: 1, at: 0 };
+        let make = |message: &str| Problem {
+            weight: Weight::Error,
+            message: message.to_owned(),
+            code: None,
+            line: 1,
+            column: 1,
+            at: 0,
+        };
         assert_eq!(make("one line").headline(), "one line");
         assert_eq!(make("first\nsecond\nthird").headline(), "first");
-        assert_eq!(make("\n  \n  indented first  \nnext").headline(), "indented first");
+        assert_eq!(
+            make("\n  \n  indented first  \nnext").headline(),
+            "indented first"
+        );
         assert_eq!(make("").headline(), "");
         assert_eq!(make("\n\n").headline(), "");
     }

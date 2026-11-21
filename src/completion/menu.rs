@@ -1,12 +1,10 @@
 //! The menu that is on screen: the items that fit the word, which one is selected, and which rows of them are
 //! shown. A list may have thousands of items; only a window of them is ever drawn.
 
+use crate::components::popup::Redraw;
 use crate::lsp::Item;
 use std::cell::RefCell;
 use std::rc::Rc;
-
-/// How many rows the menu shows at once.
-pub const WINDOW: usize = 10;
 
 /// A row of the window.
 pub struct Row<'a> {
@@ -38,9 +36,19 @@ pub struct Menu {
 }
 
 impl Menu {
+    /// How many rows the menu shows at once.
+    pub const WINDOW: usize = 10;
+
     /// A menu of the items `view` numbers, the best selected. None where there are none.
     pub fn new(list: Rc<Vec<Item>>, view: Vec<u32>, start: usize, word: &str) -> Option<Self> {
-        (!view.is_empty()).then(|| Self { list, view, selected: 0, scroll: 0, start, word: word.to_owned() })
+        (!view.is_empty()).then(|| Self {
+            list,
+            view,
+            selected: 0,
+            scroll: 0,
+            start,
+            word: word.to_owned(),
+        })
     }
 
     /// How many items fit the word.
@@ -81,34 +89,62 @@ impl Menu {
 
     /// The rows that are shown, from the top of the window.
     pub fn rows(&self) -> impl Iterator<Item = Row<'_>> {
-        let end = (self.scroll + WINDOW).min(self.view.len());
+        let end = (self.scroll + Self::WINDOW).min(self.view.len());
         (self.scroll..end).map(move |at| {
             let item = &self.list[self.view[at] as usize];
             // Only a label that begins with the word, but for its case, has a part of it to mark.
-            let typed = item.label.get(..self.word.len()).filter(|begin| begin.eq_ignore_ascii_case(&self.word)).map_or(0, str::len);
-            Row { number: at, item, typed, selected: at == self.selected }
+            let typed = item
+                .label
+                .get(..self.word.len())
+                .filter(|begin| begin.eq_ignore_ascii_case(&self.word))
+                .map_or(0, str::len);
+            Row {
+                number: at,
+                item,
+                typed,
+                selected: at == self.selected,
+            }
         })
     }
 
     /// Moves the selection one item, past the last to the first and past the first to the last.
     pub fn step(&mut self, forward: bool) {
         let count = self.view.len();
-        self.selected = if forward { (self.selected + 1) % count } else { (self.selected + count - 1) % count };
+        self.selected = if forward {
+            (self.selected + 1) % count
+        } else {
+            (self.selected + count - 1) % count
+        };
         self.show_selected();
     }
 
     /// Moves the selection a window of items, and stops at the first and the last.
     pub fn page(&mut self, forward: bool) {
-        self.selected = if forward { (self.selected + WINDOW).min(self.view.len() - 1) } else { self.selected.saturating_sub(WINDOW) };
+        self.selected = if forward {
+            (self.selected + Self::WINDOW).min(self.view.len() - 1)
+        } else {
+            self.selected.saturating_sub(Self::WINDOW)
+        };
         self.show_selected();
+    }
+
+    /// Moves the window `rows` rows, up where negative, and stops at the first row and at the last window. The selection
+    /// stays where it is, whether or not it is still in the window. Whether the window moved.
+    pub fn scroll_by(&mut self, rows: isize) -> bool {
+        let last = self.view.len().saturating_sub(Self::WINDOW);
+        let scroll = self
+            .scroll
+            .saturating_add_signed(rows)
+            .min(last);
+        std::mem::replace(&mut self.scroll, scroll) != scroll
     }
 
     /// Scrolls the window the least that shows the selected row.
     fn show_selected(&mut self) {
         if self.selected < self.scroll {
             self.scroll = self.selected;
-        } else if self.selected >= self.scroll + WINDOW {
-            self.scroll = self.selected + 1 - WINDOW;
+        } else if self.selected >= self.scroll + Self::WINDOW {
+            self.scroll = self.selected + 1 - Self::WINDOW;
         }
     }
 }
@@ -119,7 +155,7 @@ impl Menu {
 #[derive(Default)]
 pub struct MenuCell {
     menu: RefCell<Option<Menu>>,
-    redraw: RefCell<Option<Rc<dyn Fn()>>>,
+    redraw: Redraw,
     /// What is called with the number of the row that was clicked.
     picker: RefCell<Option<Rc<dyn Fn(usize)>>>,
     /// What is called when the menu is to go because of where it is: the editor lost focus or changed size.
@@ -144,11 +180,42 @@ impl MenuCell {
             return;
         }
         *self.menu.borrow_mut() = menu;
-        // Cloned out of the cell first: what draws again may read the menu.
-        let redraw = self.redraw.borrow().clone();
-        if let Some(redraw) = redraw {
-            redraw();
+        self.notify();
+    }
+
+    /// Tells what draws the menu that it is not what it drew.
+    fn notify(&self) {
+        self.redraw.fire();
+    }
+
+    /// Changes the menu that is showing in place, which `change` says whether it did. It is what the pointer does, on every
+    /// move and every turn of the wheel, and so it does not copy the list of the items that fit, as [`change`](Self::change) does.
+    fn update(&self, change: impl FnOnce(&mut Menu) -> bool) {
+        let changed = self
+            .menu
+            .borrow_mut()
+            .as_mut()
+            .is_some_and(change);
+        if changed {
+            self.notify();
         }
+    }
+
+    /// Selects the row `number` because the pointer is on it: the selection is one, and the pointer and the keys both move it.
+    /// A row that is not there is not selected.
+    pub fn hover(&self, number: usize) {
+        self.update(|menu| {
+            if number == menu.selected() || number >= menu.len() {
+                return false;
+            }
+            menu.select(number);
+            true
+        });
+    }
+
+    /// Scrolls the window of the menu that is showing `rows` rows, up where negative.
+    pub fn scroll(&self, rows: isize) {
+        self.update(|menu| menu.scroll_by(rows));
     }
 
     /// Changes what is selected in the menu that is showing.
@@ -206,9 +273,10 @@ impl MenuCell {
         }
     }
 
-    /// Sets what is called to draw the menu again, replacing the one before.
-    pub fn on_change(&self, redraw: Rc<dyn Fn()>) {
-        *self.redraw.borrow_mut() = Some(redraw);
+    /// Adds what is called to draw the menu again, which says whether what it draws is still there: the pane is built again, and a
+    /// widget of the menu is made with each build, so every one is told and the ones that are gone are forgotten.
+    pub fn on_change(&self, redraw: Rc<dyn Fn() -> bool>) {
+        self.redraw.add(redraw);
     }
 }
 
@@ -225,24 +293,39 @@ mod tests {
             label_detail: None,
             sort: label.to_owned(),
             filter: label.to_owned(),
-            edit: Edit { range: None, text: label.to_owned(), extra: vec![] },
+            edit: Edit {
+                range: None,
+                text: label.to_owned(),
+                extra: vec![],
+            },
             resolve: None,
             deprecated: false,
         }
     }
 
     fn many(count: usize) -> Rc<Vec<Item>> {
-        Rc::new((0..count).map(|number| item(&format!("item{number:03}"))).collect())
+        Rc::new(
+            (0..count)
+                .map(|number| item(&format!("item{number:03}")))
+                .collect(),
+        )
     }
 
     fn menu_of(labels: &[&str]) -> Menu {
-        let list = Rc::new(labels.iter().map(|label| item(label)).collect::<Vec<_>>());
+        let list = Rc::new(
+            labels
+                .iter()
+                .map(|label| item(label))
+                .collect::<Vec<_>>(),
+        );
         let view = (0..labels.len() as u32).collect();
         Menu::new(list, view, 4, "").expect("not empty")
     }
 
     fn shown(menu: &Menu) -> Vec<String> {
-        menu.rows().map(|row| row.item.label.clone()).collect()
+        menu.rows()
+            .map(|row| row.item.label.clone())
+            .collect()
     }
 
     #[test]
@@ -253,7 +336,15 @@ mod tests {
     #[test]
     fn the_selection_starts_at_the_best_and_wraps_both_ways() {
         let mut menu = menu_of(&["a", "b", "c"]);
-        assert_eq!((menu.selected(), menu.chosen().label.as_str(), menu.start(), menu.len()), (0, "a", 4, 3));
+        assert_eq!(
+            (
+                menu.selected(),
+                menu.chosen().label.as_str(),
+                menu.start(),
+                menu.len()
+            ),
+            (0, "a", 4, 3)
+        );
         menu.step(false);
         assert_eq!(menu.chosen().label, "c", "up from the first is the last");
         menu.step(true);
@@ -270,28 +361,52 @@ mod tests {
     fn only_a_window_of_a_long_list_is_shown_and_it_scrolls_to_keep_the_selection_in_it() {
         let list = many(100);
         let mut menu = Menu::new(Rc::clone(&list), (0..100).collect(), 0, "").unwrap();
-        assert_eq!(shown(&menu).len(), WINDOW);
-        assert_eq!((shown(&menu)[0].as_str(), shown(&menu)[WINDOW - 1].as_str()), ("item000", "item009"));
-        for _ in 0..WINDOW - 1 {
+        assert_eq!(shown(&menu).len(), Menu::WINDOW);
+        assert_eq!(
+            (
+                shown(&menu)[0].as_str(),
+                shown(&menu)[Menu::WINDOW - 1].as_str()
+            ),
+            ("item000", "item009")
+        );
+        for _ in 0..Menu::WINDOW - 1 {
             menu.step(true);
         }
-        assert_eq!(shown(&menu)[0], "item000", "the last row of the window is selected, and it has not moved yet");
+        assert_eq!(
+            shown(&menu)[0],
+            "item000",
+            "the last row of the window is selected, and it has not moved yet"
+        );
         menu.step(true);
-        assert_eq!((shown(&menu)[0].as_str(), menu.chosen().label.as_str()), ("item001", "item010"), "one more and it moves by one");
-        assert!(menu.rows().last().unwrap().selected, "the selected row is the last of the window");
+        assert_eq!(
+            (shown(&menu)[0].as_str(), menu.chosen().label.as_str()),
+            ("item001", "item010"),
+            "one more and it moves by one"
+        );
+        assert!(
+            menu.rows().last().unwrap().selected,
+            "the selected row is the last of the window"
+        );
         // Wrapping up from the first goes to the end, where the window is the last rows.
         let mut menu = Menu::new(list, (0..100).collect(), 0, "").unwrap();
         menu.step(false);
-        assert_eq!((menu.chosen().label.as_str(), shown(&menu)[0].as_str()), ("item099", "item090"));
+        assert_eq!(
+            (menu.chosen().label.as_str(), shown(&menu)[0].as_str()),
+            ("item099", "item090")
+        );
         menu.step(true);
-        assert_eq!((menu.chosen().label.as_str(), shown(&menu)[0].as_str()), ("item000", "item000"), "and back to the top");
+        assert_eq!(
+            (menu.chosen().label.as_str(), shown(&menu)[0].as_str()),
+            ("item000", "item000"),
+            "and back to the top"
+        );
     }
 
     #[test]
     fn a_page_moves_a_window_and_stops_at_the_ends() {
         let mut menu = Menu::new(many(25), (0..25).collect(), 0, "").unwrap();
         menu.page(true);
-        assert_eq!(menu.selected(), WINDOW);
+        assert_eq!(menu.selected(), Menu::WINDOW);
         menu.page(true);
         menu.page(true);
         assert_eq!(menu.selected(), 24, "the last, and not past it");
@@ -300,7 +415,91 @@ mod tests {
         assert_eq!(menu.selected(), 14);
         menu.page(false);
         menu.page(false);
-        assert_eq!((menu.selected(), shown(&menu)[0].as_str()), (0, "item000"), "the first, and not before it");
+        assert_eq!(
+            (menu.selected(), shown(&menu)[0].as_str()),
+            (0, "item000"),
+            "the first, and not before it"
+        );
+    }
+
+    #[test]
+    fn the_wheel_moves_the_window_and_not_the_selection_and_stops_at_the_ends() {
+        let mut menu = Menu::new(many(25), (0..25).collect(), 0, "").unwrap();
+        assert!(!menu.scroll_by(-3), "the window is at the top already");
+        assert!(menu.scroll_by(3));
+        assert_eq!(
+            (shown(&menu)[0].as_str(), menu.selected()),
+            ("item003", 0),
+            "the selection stays where it is, out of view"
+        );
+        assert!(menu.scroll_by(100));
+        assert_eq!(
+            shown(&menu)[0],
+            "item015",
+            "the last window is the last rows, and not past them"
+        );
+        assert!(!menu.scroll_by(1), "it is at the bottom");
+        assert!(menu.scroll_by(-100));
+        assert_eq!(shown(&menu)[0], "item000");
+        let mut short = menu_of(&["a", "b"]);
+        assert!(
+            !short.scroll_by(1) && !short.scroll_by(-1),
+            "a list that fits has nothing to scroll"
+        );
+    }
+
+    #[test]
+    fn a_key_after_the_wheel_brings_the_selection_back_into_the_window_by_the_least() {
+        let mut menu = Menu::new(many(40), (0..40).collect(), 0, "").unwrap();
+        menu.scroll_by(20);
+        assert!(
+            !menu.rows().any(|row| row.selected),
+            "the selected row was scrolled out of view"
+        );
+        menu.step(true);
+        assert_eq!(
+            (menu.selected(), shown(&menu)[0].as_str()),
+            (1, "item001"),
+            "the window goes to the item and no further"
+        );
+    }
+
+    #[test]
+    fn a_move_of_the_pointer_selects_the_row_under_it_and_a_row_already_selected_changes_nothing() {
+        let cell = MenuCell::default();
+        let drawn = Rc::new(std::cell::Cell::new(0));
+        let counted = Rc::clone(&drawn);
+        cell.on_change(Rc::new(move || {
+            counted.set(counted.get() + 1);
+            true
+        }));
+        cell.hover(2);
+        assert_eq!(drawn.get(), 0, "nothing is showing");
+        cell.set(Some(Menu::new(many(25), (0..25).collect(), 0, "").unwrap()));
+        assert_eq!(drawn.get(), 1);
+        cell.hover(0);
+        assert_eq!(drawn.get(), 1, "the row selected is the row hovered");
+        cell.hover(4);
+        assert_eq!(
+            (cell.with(|menu| menu.map(Menu::selected)), drawn.get()),
+            (Some(4), 2)
+        );
+        cell.hover(25);
+        assert_eq!(
+            cell.with(|menu| menu.map(Menu::selected)),
+            Some(4),
+            "there is no row 25"
+        );
+        cell.scroll(3);
+        assert_eq!(
+            (cell.with(|menu| menu.map(Menu::selected)), drawn.get()),
+            (Some(4), 3),
+            "the wheel draws it again"
+        );
+        cell.scroll(0);
+        cell.scroll(-3);
+        cell.scroll(-1);
+        assert_eq!(drawn.get(), 4, "a wheel that moves nothing draws nothing");
     }
 
     #[test]
@@ -310,14 +509,46 @@ mod tests {
 
     #[test]
     fn a_row_marks_the_part_of_the_label_that_is_the_word() {
-        let list = Rc::new(vec![item("push_str"), item("Pushover"), item("x_push"), item("\u{e9}t\u{e9}")]);
+        let list = Rc::new(vec![
+            item("push_str"),
+            item("Pushover"),
+            item("x_push"),
+            item("\u{e9}t\u{e9}"),
+        ]);
         let menu = Menu::new(Rc::clone(&list), vec![0, 1, 2], 0, "push").unwrap();
-        assert_eq!(menu.rows().map(|row| row.typed).collect::<Vec<_>>(), [4, 4, 0], "a label that does not begin with it has none to mark");
+        assert_eq!(
+            menu.rows()
+                .map(|row| row.typed)
+                .collect::<Vec<_>>(),
+            [4, 4, 0],
+            "a label that does not begin with it has none to mark"
+        );
         // A word that is in the middle of a character of the label does not split it.
         let menu = Menu::new(list, vec![3], 0, "\u{e9}t").unwrap();
         assert_eq!(menu.rows().next().unwrap().typed, 3);
         let short = Menu::new(Rc::new(vec![item("ab")]), vec![0], 0, "abc").unwrap();
-        assert_eq!(short.rows().next().unwrap().typed, 0, "a word longer than the label");
+        assert_eq!(
+            short.rows().next().unwrap().typed,
+            0,
+            "a word longer than the label"
+        );
+    }
+
+    #[test]
+    fn a_menu_on_screen_is_still_drawn_when_a_widget_that_was_made_after_it_is_gone() {
+        // The pane is built again and the widget of the menu is made again with it: the framework may drop the one made last.
+        let cell = MenuCell::default();
+        let drawn = Rc::new(std::cell::Cell::new(0));
+        let counted = Rc::clone(&drawn);
+        cell.on_change(Rc::new(move || {
+            counted.set(counted.get() + 1);
+            true
+        }));
+        cell.on_change(Rc::new(|| false));
+        cell.set(Some(menu_of(&["a", "b"])));
+        assert_eq!(drawn.get(), 1);
+        cell.set(None);
+        assert_eq!(drawn.get(), 2, "the one that is gone was forgotten, and the other is still told");
     }
 
     #[test]
@@ -325,15 +556,25 @@ mod tests {
         let cell = MenuCell::default();
         let drawn = Rc::new(std::cell::Cell::new(0));
         let counted = Rc::clone(&drawn);
-        cell.on_change(Rc::new(move || counted.set(counted.get() + 1)));
+        cell.on_change(Rc::new(move || {
+            counted.set(counted.get() + 1);
+            true
+        }));
         assert!(!cell.is_open());
         cell.set(None);
         assert_eq!(drawn.get(), 0, "closed stays closed");
         cell.set(Some(menu_of(&["a", "b"])));
         cell.set(Some(menu_of(&["a", "b"])));
-        assert_eq!((drawn.get(), cell.is_open()), (1, true), "the same menu twice is one change");
+        assert_eq!(
+            (drawn.get(), cell.is_open()),
+            (1, true),
+            "the same menu twice is one change"
+        );
         cell.step(true);
-        assert_eq!(cell.with(|menu| menu.map(|menu| menu.chosen().label.clone())), Some("b".to_owned()));
+        assert_eq!(
+            cell.with(|menu| menu.map(|menu| menu.chosen().label.clone())),
+            Some("b".to_owned())
+        );
         assert_eq!(drawn.get(), 2);
         cell.page(false);
         assert_eq!(cell.with(|menu| menu.map(Menu::selected)), Some(0));

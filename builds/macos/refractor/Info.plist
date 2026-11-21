@@ -48,6 +48,18 @@
             <key>LSHandlerRank</key>
             <string>Alternate</string>
         </dict>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Folder</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>public.folder</string>
+            </array>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+        </dict>
     </array>
     <!-- aimer:documents:end -->
 </dict>

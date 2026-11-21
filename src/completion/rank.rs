@@ -23,7 +23,11 @@ fn tier(filter: &str, word: &str, fuzzy: bool) -> Option<u8> {
         return (fuzzy && at_word_starts(filter, word, 0, false)).then_some(3);
     }
     // Text that is not ascii is rarer, and is compared by the letters it has.
-    let lower = |text: &str| -> Vec<char> { text.chars().flat_map(char::to_lowercase).collect() };
+    let lower = |text: &str| -> Vec<char> {
+        text.chars()
+            .flat_map(char::to_lowercase)
+            .collect()
+    };
     let (lowered_filter, lowered_word) = (lower(filter), lower(word));
     if lowered_filter.starts_with(&lowered_word) {
         return Some(2);
@@ -52,7 +56,11 @@ fn tier(filter: &str, word: &str, fuzzy: bool) -> Option<u8> {
 fn starts_a_word(before: Option<char>, c: char) -> bool {
     match before {
         None => true,
-        Some(before) => !before.is_alphanumeric() || (c.is_uppercase() && !before.is_uppercase()) || (c.is_numeric() && !before.is_numeric()),
+        Some(before) => {
+            !before.is_alphanumeric()
+                || (c.is_uppercase() && !before.is_uppercase())
+                || (c.is_numeric() && !before.is_numeric())
+        }
     }
 }
 
@@ -63,17 +71,32 @@ fn at_word_starts(filter: &[u8], word: &[u8], from: usize, follows: bool) -> boo
     };
     (from..filter.len()).any(|at| {
         filter[at].eq_ignore_ascii_case(&want)
-            && (follows && at == from || starts_a_word(at.checked_sub(1).map(|before| char::from(filter[before])), char::from(filter[at])))
+            && (follows && at == from
+                || starts_a_word(
+                    at.checked_sub(1)
+                        .map(|before| char::from(filter[before])),
+                    char::from(filter[at]),
+                ))
             && at_word_starts(filter, rest, at + 1, true)
     })
 }
 
 /// [`at_word_starts`] for text that is not ascii, with the starts worked out.
-fn at_word_starts_of(filter: &[char], starts: &[bool], word: &[char], from: usize, follows: bool) -> bool {
+fn at_word_starts_of(
+    filter: &[char],
+    starts: &[bool],
+    word: &[char],
+    from: usize,
+    follows: bool,
+) -> bool {
     let Some((&want, rest)) = word.split_first() else {
         return true;
     };
-    (from..filter.len()).any(|at| filter[at] == want && (follows && at == from || starts[at]) && at_word_starts_of(filter, starts, rest, at + 1, true))
+    (from..filter.len()).any(|at| {
+        filter[at] == want
+            && (follows && at == from || starts[at])
+            && at_word_starts_of(filter, starts, rest, at + 1, true)
+    })
 }
 
 /// The numbers of the items of `items` that fit `word`, best first. `within` limits the search to those
@@ -81,11 +104,24 @@ fn at_word_starts_of(filter: &[char], starts: &[bool], word: &[char], from: usiz
 /// has the letters of the word in order fit it.
 pub fn rank(items: &[Item], within: Option<&[u32]>, word: &str, fuzzy: bool) -> Vec<u32> {
     let mut fitting: Vec<(u8, u32)> = match within {
-        Some(numbers) => numbers.iter().filter_map(|&at| tier(&items[at as usize].filter, word, fuzzy).map(|tier| (tier, at))).collect(),
-        None => items.iter().enumerate().filter_map(|(at, item)| tier(&item.filter, word, fuzzy).map(|tier| (tier, at as u32))).collect(),
+        Some(numbers) => numbers
+            .iter()
+            .filter_map(|&at| tier(&items[at as usize].filter, word, fuzzy).map(|tier| (tier, at)))
+            .collect(),
+        None => items
+            .iter()
+            .enumerate()
+            .filter_map(|(at, item)| tier(&item.filter, word, fuzzy).map(|tier| (tier, at as u32)))
+            .collect(),
     };
     // Stable, so that items of the same tier and sort text stay in the order they were given.
-    fitting.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| items[a.1 as usize].sort.cmp(&items[b.1 as usize].sort)));
+    fitting.sort_by(|a, b| {
+        a.0.cmp(&b.0).then_with(|| {
+            items[a.1 as usize]
+                .sort
+                .cmp(&items[b.1 as usize].sort)
+        })
+    });
     fitting.into_iter().map(|(_, at)| at).collect()
 }
 
@@ -102,14 +138,21 @@ mod tests {
             label_detail: None,
             sort: sort.to_owned(),
             filter: filter.to_owned(),
-            edit: Edit { range: None, text: filter.to_owned(), extra: vec![] },
+            edit: Edit {
+                range: None,
+                text: filter.to_owned(),
+                extra: vec![],
+            },
             resolve: None,
             deprecated: false,
         }
     }
 
     fn labels(items: &[Item], found: &[u32]) -> Vec<String> {
-        found.iter().map(|&at| items[at as usize].label.clone()).collect()
+        found
+            .iter()
+            .map(|&at| items[at as usize].label.clone())
+            .collect()
     }
 
     fn ranked(items: &[Item], word: &str) -> Vec<String> {
@@ -121,8 +164,16 @@ mod tests {
     }
 
     #[test]
-    fn the_word_itself_comes_first_then_what_begins_with_it_then_what_has_its_letters_at_the_starts_of_words() {
-        let items = [item("HashMap", "a"), item("letm", "a"), item("let", "z"), item("Letter", "b"), item("l_e_t", "c"), item("AnyElement", "d")];
+    fn the_word_itself_comes_first_then_what_begins_with_it_then_what_has_its_letters_at_the_starts_of_words()
+     {
+        let items = [
+            item("HashMap", "a"),
+            item("letm", "a"),
+            item("let", "z"),
+            item("Letter", "b"),
+            item("l_e_t", "c"),
+            item("AnyElement", "d"),
+        ];
         // The word as it is, though the server likes the others better; then case that is the same; then case that is not; then
         // the letters of the word, each beginning a word of the name. AnyElement has an l, an e and a t but none begins a word.
         assert_eq!(ranked(&items, "let"), ["let", "letm", "Letter", "l_e_t"]);
@@ -145,22 +196,54 @@ mod tests {
 
     #[test]
     fn letters_find_the_words_of_a_name_that_they_begin() {
-        let items = [item("HashMap", "a"), item("HashSet", "b"), item("hasher", "c"), item("split_off", "d"), item("SplitOff", "e"), item("escape_debug", "f")];
+        let items = [
+            item("HashMap", "a"),
+            item("HashSet", "b"),
+            item("hasher", "c"),
+            item("split_off", "d"),
+            item("SplitOff", "e"),
+            item("escape_debug", "f"),
+        ];
         assert_eq!(ranked(&items, "hm"), ["HashMap"], "the capitals of a name");
         assert_eq!(ranked(&items, "hset"), ["HashSet"]);
-        assert_eq!(ranked(&items, "hs"), ["HashSet"], "H of Hash and S of Set, and not the s in the middle of the others");
-        assert_eq!(ranked(&items, "so"), ["split_off", "SplitOff"], "each word of a name with underscores or capitals");
+        assert_eq!(
+            ranked(&items, "hs"),
+            ["HashSet"],
+            "H of Hash and S of Set, and not the s in the middle of the others"
+        );
+        assert_eq!(
+            ranked(&items, "so"),
+            ["split_off", "SplitOff"],
+            "each word of a name with underscores or capitals"
+        );
         assert_eq!(ranked(&items, "ed"), ["escape_debug"]);
         assert!(ranked(&items, "zz").is_empty());
-        assert!(ranked(&items, "hashmapp").is_empty(), "a word that is longer than the item is not in it");
+        assert!(
+            ranked(&items, "hashmapp").is_empty(),
+            "a word that is longer than the item is not in it"
+        );
     }
 
     #[test]
-    fn a_letter_that_follows_one_that_matched_may_continue_the_word_and_is_not_taken_from_the_middle_of_one() {
-        let items = [item("HashMap", "a"), item("push_str", "b"), item("split_inclusive", "c"), item("strip_suffix", "d")];
-        assert_eq!(ranked(&items, "hashm"), ["HashMap"], "hash, then the word that begins at M");
+    fn a_letter_that_follows_one_that_matched_may_continue_the_word_and_is_not_taken_from_the_middle_of_one()
+     {
+        let items = [
+            item("HashMap", "a"),
+            item("push_str", "b"),
+            item("split_inclusive", "c"),
+            item("strip_suffix", "d"),
+        ];
+        assert_eq!(
+            ranked(&items, "hashm"),
+            ["HashMap"],
+            "hash, then the word that begins at M"
+        );
         assert_eq!(ranked(&items, "pus"), ["push_str"]);
-        assert_eq!(ranked(&items, "pu"), ["push_str"], "the u of split_inclusive and the p of strip_suffix are not at the start of a word");
+        assert_eq!(
+            ranked(&items, "pu"),
+            ["push_str"],
+            "the u of split_inclusive and the p of strip_suffix are not at the start of a word"
+        );
         assert_eq!(ranked(&items, "ps"), ["push_str"], "p, then the s of str");
     }
 
@@ -169,32 +252,68 @@ mod tests {
         let items = [item("Err()", "a"), item("std::collections::HashMap", "b")];
         assert_eq!(ranked(&items, "er"), ["Err()"]);
         assert_eq!(ranked(&items, "hm"), ["std::collections::HashMap"]);
-        assert_eq!(ranked(&items, "stc"), ["std::collections::HashMap"], "the start of std and of collections");
+        assert_eq!(
+            ranked(&items, "stc"),
+            ["std::collections::HashMap"],
+            "the start of std and of collections"
+        );
     }
 
     #[test]
     fn without_fuzzy_only_what_begins_with_the_word_fits_it() {
-        let items = [item("static", "1"), item("SomeThing", "2"), item("const", "3")];
+        let items = [
+            item("static", "1"),
+            item("SomeThing", "2"),
+            item("const", "3"),
+        ];
         assert_eq!(ranked_with(&items, "st", false), ["static"]);
-        assert_eq!(ranked_with(&items, "st", true), ["static", "SomeThing"], "S and T of the two words; const has no s that begins a word");
+        assert_eq!(
+            ranked_with(&items, "st", true),
+            ["static", "SomeThing"],
+            "S and T of the two words; const has no s that begins a word"
+        );
     }
 
     #[test]
     fn a_word_that_has_grown_is_looked_for_only_among_what_fitted_it() {
-        let items = [item("push", "1"), item("pull", "2"), item("pop", "3"), item("peek", "4")];
+        let items = [
+            item("push", "1"),
+            item("pull", "2"),
+            item("pop", "3"),
+            item("peek", "4"),
+        ];
         let first = rank(&items, None, "p", true);
         assert_eq!(first.len(), 4);
         let narrowed = rank(&items, Some(&first), "pu", true);
         assert_eq!(labels(&items, &narrowed), ["push", "pull"]);
-        assert_eq!(rank(&items, Some(&narrowed), "pus", true), rank(&items, None, "pus", true), "the same as looking at all of them");
+        assert_eq!(
+            rank(&items, Some(&narrowed), "pus", true),
+            rank(&items, None, "pus", true),
+            "the same as looking at all of them"
+        );
         assert!(rank(&items, Some(&[]), "p", true).is_empty());
     }
 
     #[test]
     fn letters_that_are_not_ascii_are_compared_without_their_case_too() {
-        let items = [item("\u{c9}t\u{e9}", "a"), item("ete", "b"), item("sous_\u{e9}t\u{e9}", "c")];
-        assert_eq!(ranked(&items, "\u{e9}t"), ["\u{c9}t\u{e9}", "sous_\u{e9}t\u{e9}"], "the second has the word at the start of its last word");
-        assert_eq!(ranked(&items, "\u{c9}"), ["\u{c9}t\u{e9}", "sous_\u{e9}t\u{e9}"]);
-        assert_eq!(ranked(&items, "s\u{e9}"), ["sous_\u{e9}t\u{e9}"], "the accent at the start of a word after an underscore");
+        let items = [
+            item("\u{c9}t\u{e9}", "a"),
+            item("ete", "b"),
+            item("sous_\u{e9}t\u{e9}", "c"),
+        ];
+        assert_eq!(
+            ranked(&items, "\u{e9}t"),
+            ["\u{c9}t\u{e9}", "sous_\u{e9}t\u{e9}"],
+            "the second has the word at the start of its last word"
+        );
+        assert_eq!(
+            ranked(&items, "\u{c9}"),
+            ["\u{c9}t\u{e9}", "sous_\u{e9}t\u{e9}"]
+        );
+        assert_eq!(
+            ranked(&items, "s\u{e9}"),
+            ["sous_\u{e9}t\u{e9}"],
+            "the accent at the start of a word after an underscore"
+        );
     }
 }

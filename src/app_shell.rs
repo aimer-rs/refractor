@@ -1,7 +1,10 @@
 mod file_opener;
+pub mod menu_commands;
 
 use self::file_opener::FileOpener;
+use self::menu_commands::MenuCommands;
 use crate::screen::editor::EditorScreen;
+use crate::settings::{Settings, ThemeMode};
 use crate::theme::CodeTheme;
 use aimer::animation::curves;
 use aimer::style::AnimatedTheme;
@@ -13,11 +16,13 @@ use std::time::Duration;
 pub struct AppShell;
 
 impl StatelessWidget for AppShell {
-    fn build(&self, _ctx: &BuildContext) -> impl Widget {
+    fn build(&self, ctx: &BuildContext) -> impl Widget {
+        // The theme is the user's choice, and the change of it fades over the duration below.
+        let mode = ctx.select::<Settings, ThemeMode>(|settings| settings.theme());
         AnimatedTheme::new()
-            .data(CodeTheme::dark())
+            .data(CodeTheme::for_mode(mode))
             .duration(Duration::from_millis(300))
             .curve(curves::EASE_IN_OUT)
-            .child(FileOpener::new(EditorScreen))
+            .child(MenuCommands::new(FileOpener::new(EditorScreen)))
     }
 }

@@ -23,13 +23,23 @@ pub struct Mailbox<T> {
 
 impl<T> Mailbox<T> {
     pub fn new() -> Self {
-        Self { queue: Mutex::new(VecDeque::new()), waker: Mutex::new(None) }
+        Self {
+            queue: Mutex::new(VecDeque::new()),
+            waker: Mutex::new(None),
+        }
     }
 
     /// Leaves `item`, and wakes whoever waits.
     pub fn push(&self, item: T) {
-        self.queue.lock().expect("no thread panics holding the queue").push_back(item);
-        let waker = self.waker.lock().expect("no thread panics holding the waker").take();
+        self.queue
+            .lock()
+            .expect("no thread panics holding the queue")
+            .push_back(item);
+        let waker = self
+            .waker
+            .lock()
+            .expect("no thread panics holding the waker")
+            .take();
         if let Some(waker) = waker {
             waker.wake();
         }
@@ -37,11 +47,18 @@ impl<T> Mailbox<T> {
 
     /// Takes everything that is left, in the order it was left.
     pub fn drain(&self) -> Vec<T> {
-        self.queue.lock().expect("no thread panics holding the queue").drain(..).collect()
+        self.queue
+            .lock()
+            .expect("no thread panics holding the queue")
+            .drain(..)
+            .collect()
     }
 
     fn is_empty(&self) -> bool {
-        self.queue.lock().expect("no thread panics holding the queue").is_empty()
+        self.queue
+            .lock()
+            .expect("no thread panics holding the queue")
+            .is_empty()
     }
 
     /// Ready when there is something to take, and wakes the task that polls it when there is.
@@ -49,10 +66,17 @@ impl<T> Mailbox<T> {
         if !self.is_empty() {
             return Poll::Ready(());
         }
-        *self.waker.lock().expect("no thread panics holding the waker") = Some(cx.waker().clone());
+        *self
+            .waker
+            .lock()
+            .expect("no thread panics holding the waker") = Some(cx.waker().clone());
         // Looked at again: something left between the first look and the waker being kept would
         // have found no waker to wake.
-        if self.is_empty() { Poll::Pending } else { Poll::Ready(()) }
+        if self.is_empty() {
+            Poll::Pending
+        } else {
+            Poll::Ready(())
+        }
     }
 }
 
@@ -90,9 +114,18 @@ impl Server {
             .stderr(Stdio::piped())
             .spawn()?;
         let id = child.id();
-        let stdin = child.stdin.take().expect("the input was asked to be a pipe");
-        let stdout = child.stdout.take().expect("the output was asked to be a pipe");
-        let stderr = child.stderr.take().expect("the error output was asked to be a pipe");
+        let stdin = child
+            .stdin
+            .take()
+            .expect("the input was asked to be a pipe");
+        let stdout = child
+            .stdout
+            .take()
+            .expect("the output was asked to be a pipe");
+        let stderr = child
+            .stderr
+            .take()
+            .expect("the error output was asked to be a pipe");
         let child = Arc::new(Mutex::new(child));
         let mailbox = Arc::new(Mailbox::new());
 
@@ -104,8 +137,13 @@ impl Server {
             thread::Builder::new()
                 .name("refractor-lsp-stderr".into())
                 .spawn(move || {
-                    for line in BufReader::new(stderr).lines().map_while(Result::ok) {
-                        let mut tail = tail.lock().expect("no thread panics holding the lines");
+                    for line in BufReader::new(stderr)
+                        .lines()
+                        .map_while(Result::ok)
+                    {
+                        let mut tail = tail
+                            .lock()
+                            .expect("no thread panics holding the lines");
                         if tail.len() == KEPT_ERROR_LINES {
                             tail.pop_front();
                         }
@@ -116,50 +154,69 @@ impl Server {
         }
 
         let (outgoing, to_write) = mpsc::channel::<Vec<u8>>();
-        thread::Builder::new().name("refractor-lsp-writer".into()).spawn(move || {
-            let mut stdin = stdin;
-            // Ends when the server is dropped, which closes the pipe, or when the pipe is broken, which
-            // the reader says when it finds the server gone.
-            while let Ok(body) = to_write.recv() {
-                if transport::write_message(&mut stdin, &body).is_err() {
-                    break;
+        thread::Builder::new()
+            .name("refractor-lsp-writer".into())
+            .spawn(move || {
+                let mut stdin = stdin;
+                // Ends when the server is dropped, which closes the pipe, or when the pipe is broken, which
+                // the reader says when it finds the server gone.
+                while let Ok(body) = to_write.recv() {
+                    if transport::write_message(&mut stdin, &body).is_err() {
+                        break;
+                    }
                 }
-            }
-        })?;
+            })?;
 
         {
             let (mailbox, child) = (Arc::clone(&mailbox), Arc::clone(&child));
-            thread::Builder::new().name("refractor-lsp-reader".into()).spawn(move || {
-                let mut input = BufReader::new(stdout);
-                let reason = loop {
-                    match transport::read_message(&mut input) {
-                        Ok(Some(body)) => match transport::parse(&body) {
-                            Ok(message) => mailbox.push(Event::Message(message)),
-                            Err(why) => mailbox.push(Event::Malformed(why)),
-                        },
-                        Ok(None) => break "the server closed its output".to_owned(),
-                        Err(error) => break format!("the server's output could not be read: {error}"),
+            thread::Builder::new()
+                .name("refractor-lsp-reader".into())
+                .spawn(move || {
+                    let mut input = BufReader::new(stdout);
+                    let reason = loop {
+                        match transport::read_message(&mut input) {
+                            Ok(Some(body)) => match transport::parse(&body) {
+                                Ok(message) => mailbox.push(Event::Message(message)),
+                                Err(why) => mailbox.push(Event::Malformed(why)),
+                            },
+                            Ok(None) => break "the server closed its output".to_owned(),
+                            Err(error) => {
+                                break format!("the server's output could not be read: {error}");
+                            }
+                        }
+                    };
+                    let status = exit_status(&child, Duration::from_secs(2));
+                    // Its last words are the part of its error output that has been read: a little is waited
+                    // for, but not for a program it started that still holds the pipe.
+                    let waited = Instant::now();
+                    while !tail_done.load(Ordering::Acquire)
+                        && waited.elapsed() < Duration::from_millis(300)
+                    {
+                        thread::sleep(Duration::from_millis(5));
                     }
-                };
-                let status = exit_status(&child, Duration::from_secs(2));
-                // Its last words are the part of its error output that has been read: a little is waited
-                // for, but not for a program it started that still holds the pipe.
-                let waited = Instant::now();
-                while !tail_done.load(Ordering::Acquire) && waited.elapsed() < Duration::from_millis(300) {
-                    thread::sleep(Duration::from_millis(5));
-                }
-                let last = tail.lock().expect("no thread panics holding the lines").iter().cloned().collect::<Vec<_>>().join(" / ");
-                let mut why = reason;
-                if let Some(status) = status {
-                    why = format!("{why} ({status})");
-                }
-                if !last.is_empty() {
-                    why = format!("{why}: {last}");
-                }
-                mailbox.push(Event::Gone(why));
-            })?;
+                    let last = tail
+                        .lock()
+                        .expect("no thread panics holding the lines")
+                        .iter()
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(" / ");
+                    let mut why = reason;
+                    if let Some(status) = status {
+                        why = format!("{why} ({status})");
+                    }
+                    if !last.is_empty() {
+                        why = format!("{why}: {last}");
+                    }
+                    mailbox.push(Event::Gone(why));
+                })?;
         }
-        Ok(Self { id, child, outgoing, mailbox })
+        Ok(Self {
+            id,
+            child,
+            outgoing,
+            mailbox,
+        })
     }
 
     /// The process's number.
@@ -180,7 +237,11 @@ impl Server {
 
     /// Stops the process.
     pub fn kill(&self) {
-        let _ = self.child.lock().expect("no thread panics holding the process").kill();
+        let _ = self
+            .child
+            .lock()
+            .expect("no thread panics holding the process")
+            .kill();
     }
 }
 
@@ -194,7 +255,11 @@ impl Drop for Server {
 fn exit_status(child: &Mutex<Child>, time: Duration) -> Option<String> {
     let deadline = Instant::now() + time;
     loop {
-        match child.lock().expect("no thread panics holding the process").try_wait() {
+        match child
+            .lock()
+            .expect("no thread panics holding the process")
+            .try_wait()
+        {
             Ok(Some(status)) => return Some(status.to_string()),
             Ok(None) if Instant::now() < deadline => {}
             _ => return None,
@@ -232,7 +297,10 @@ mod tests {
             if let Poll::Ready(value) = future.as_mut().poll(&mut cx) {
                 return value;
             }
-            assert!(Instant::now() < deadline, "the future was not woken in ten seconds");
+            assert!(
+                Instant::now() < deadline,
+                "the future was not woken in ten seconds"
+            );
             thread::park_timeout(Duration::from_millis(200));
         }
     }
@@ -247,7 +315,10 @@ mod tests {
         let mut events = Vec::new();
         let deadline = Instant::now() + Duration::from_secs(10);
         while !done(&events) {
-            assert!(Instant::now() < deadline, "the server did not do enough in ten seconds: {events:?}");
+            assert!(
+                Instant::now() < deadline,
+                "the server did not do enough in ten seconds: {events:?}"
+            );
             wait_for(&mailbox);
             events.extend(mailbox.drain());
         }
@@ -308,7 +379,9 @@ mod tests {
             thread.join().unwrap();
         }
         got.sort_unstable();
-        let mut expected: Vec<i32> = (0..4).flat_map(|t| (0..250).map(move |n| t * 1000 + n)).collect();
+        let mut expected: Vec<i32> = (0..4)
+            .flat_map(|t| (0..250).map(move |n| t * 1000 + n))
+            .collect();
         expected.sort_unstable();
         assert_eq!(got, expected);
     }
@@ -318,15 +391,29 @@ mod tests {
     fn what_a_server_is_sent_goes_through_its_pipes_and_what_it_says_comes_back_as_messages() {
         // `cat` says what it is told, so a request that is sent comes back as a request.
         let server = Server::spawn("cat", &[], Path::new("/")).expect("cat can be run");
-        server.send(transport::request(5, "echo", json!({"text": "caf\u{e9} \u{1f600}"})));
+        server.send(transport::request(
+            5,
+            "echo",
+            json!({"text": "caf\u{e9} \u{1f600}"}),
+        ));
         server.send(transport::notification("later", json!([1, 2])));
         server.send(b"{\"not\": \"a message\"}".to_vec());
         let events = events_until(&server, |events| events.len() >= 3);
         assert_eq!(
             events[0],
-            Event::Message(Incoming::Request { id: json!(5), method: "echo".into(), params: json!({"text": "caf\u{e9} \u{1f600}"}) })
+            Event::Message(Incoming::Request {
+                id: json!(5),
+                method: "echo".into(),
+                params: json!({"text": "caf\u{e9} \u{1f600}"})
+            })
         );
-        assert_eq!(events[1], Event::Message(Incoming::Notification { method: "later".into(), params: json!([1, 2]) }));
+        assert_eq!(
+            events[1],
+            Event::Message(Incoming::Notification {
+                method: "later".into(),
+                params: json!([1, 2])
+            })
+        );
         assert!(matches!(&events[2], Event::Malformed(_)), "{:?}", events[2]);
         server.kill();
     }
@@ -334,30 +421,57 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_server_that_exits_is_reported_gone_with_how_it_exited_and_what_it_said_last() {
-        let server = Server::spawn("sh", &["-c".into(), "echo 'the last thing said' >&2; exit 3".into()], Path::new("/")).expect("sh can be run");
-        let events = events_until(&server, |events| events.iter().any(|event| matches!(event, Event::Gone(_))));
-        let Some(Event::Gone(why)) = events.last() else { panic!("{events:?}") };
+        let server = Server::spawn(
+            "sh",
+            &["-c".into(), "echo 'the last thing said' >&2; exit 3".into()],
+            Path::new("/"),
+        )
+        .expect("sh can be run");
+        let events = events_until(&server, |events| {
+            events
+                .iter()
+                .any(|event| matches!(event, Event::Gone(_)))
+        });
+        let Some(Event::Gone(why)) = events.last() else {
+            panic!("{events:?}")
+        };
         assert!(why.contains('3'), "the status is said: {why}");
-        assert!(why.contains("the last thing said"), "and what it last said on its error output: {why}");
+        assert!(
+            why.contains("the last thing said"),
+            "and what it last said on its error output: {why}"
+        );
     }
 
     #[cfg(unix)]
     #[test]
     fn a_server_that_is_killed_is_reported_gone_at_once() {
-        let server = Server::spawn("sleep", &["30".into()], Path::new("/")).expect("sleep can be run");
+        let server =
+            Server::spawn("sleep", &["30".into()], Path::new("/")).expect("sleep can be run");
         assert!(server.id() > 0);
         let started = Instant::now();
         server.kill();
-        let events = events_until(&server, |events| events.iter().any(|event| matches!(event, Event::Gone(_))));
-        assert!(started.elapsed() < Duration::from_secs(5), "{:?}", started.elapsed());
+        let events = events_until(&server, |events| {
+            events
+                .iter()
+                .any(|event| matches!(event, Event::Gone(_)))
+        });
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "{:?}",
+            started.elapsed()
+        );
         assert!(matches!(events.last(), Some(Event::Gone(_))));
     }
 
     #[test]
     fn a_program_that_cannot_be_run_is_an_error_and_not_a_server_that_is_gone() {
-        let error = Server::spawn("a-program-that-is-not-installed-here", &[], Path::new("/")).err().expect("it is not found");
+        let error = Server::spawn("a-program-that-is-not-installed-here", &[], Path::new("/"))
+            .err()
+            .expect("it is not found");
         assert_eq!(error.kind(), io::ErrorKind::NotFound);
-        let error = Server::spawn("cat", &[], Path::new("/a/folder/that/is/not/there")).err().expect("the folder is not there");
+        let error = Server::spawn("cat", &[], Path::new("/a/folder/that/is/not/there"))
+            .err()
+            .expect("the folder is not there");
         assert_eq!(error.kind(), io::ErrorKind::NotFound);
     }
 }

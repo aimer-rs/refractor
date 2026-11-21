@@ -52,7 +52,10 @@ pub fn position_of(text: &TextSnapshot, byte: usize, encoding: Encoding) -> Posi
             }
         }
     };
-    Position { line: line as u32, character: character as u32 }
+    Position {
+        line: line as u32,
+        character: character as u32,
+    }
 }
 
 /// The byte of `text` that `position` is at.
@@ -65,7 +68,10 @@ pub fn byte_of(text: &TextSnapshot, position: Position, encoding: Encoding) -> u
     let character = position.character as usize;
     match encoding {
         Encoding::Utf8 => {
-            let mut at = content.start.saturating_add(character).min(content.end);
+            let mut at = content
+                .start
+                .saturating_add(character)
+                .min(content.end);
             while at > content.start && !text.is_char_boundary(at) {
                 at -= 1;
             }
@@ -119,7 +125,12 @@ mod tests {
 
     /// The position of the byte where `needle` starts.
     fn position_at(text: &str, needle: &str, encoding: Encoding) -> Position {
-        position_of(&snapshot(text), text.find(needle).expect("the needle is in the text"), encoding)
+        position_of(
+            &snapshot(text),
+            text.find(needle)
+                .expect("the needle is in the text"),
+            encoding,
+        )
     }
 
     #[test]
@@ -138,7 +149,11 @@ mod tests {
         for encoding in [UTF8, UTF16] {
             assert_eq!(position_of(&snapshot(""), 0, encoding), at(0, 0));
             assert_eq!(byte_of(&snapshot(""), at(0, 0), encoding), 0);
-            assert_eq!(byte_of(&snapshot(""), at(5, 9), encoding), 0, "past the end of nothing");
+            assert_eq!(
+                byte_of(&snapshot(""), at(5, 9), encoding),
+                0,
+                "past the end of nothing"
+            );
             // One line that has no line break at its end.
             assert_eq!(position_of(&snapshot("abc"), 3, encoding), at(0, 3));
             assert_eq!(byte_of(&snapshot("abc"), at(0, 3), encoding), 3);
@@ -158,8 +173,14 @@ mod tests {
         assert_eq!(position_at(text, "z", UTF16), at(0, 1 + 1 + 1 + 2));
         assert_eq!(position_at(text, "\u{1f600}", UTF16), at(0, 3));
         let snapshot = snapshot(text);
-        assert_eq!(byte_of(&snapshot, at(0, 1 + 2 + 3 + 4), UTF8), text.find('z').unwrap());
-        assert_eq!(byte_of(&snapshot, at(0, 1 + 1 + 1 + 2), UTF16), text.find('z').unwrap());
+        assert_eq!(
+            byte_of(&snapshot, at(0, 1 + 2 + 3 + 4), UTF8),
+            text.find('z').unwrap()
+        );
+        assert_eq!(
+            byte_of(&snapshot, at(0, 1 + 1 + 1 + 2), UTF16),
+            text.find('z').unwrap()
+        );
     }
 
     #[test]
@@ -168,19 +189,35 @@ mod tests {
         let text = "e\u{301}x";
         assert_eq!(position_at(text, "x", UTF16), at(0, 2));
         assert_eq!(position_at(text, "x", UTF8), at(0, 3));
-        assert_eq!(byte_of(&snapshot(text), at(0, 1), UTF16), 1, "between the base and its mark");
+        assert_eq!(
+            byte_of(&snapshot(text), at(0, 1), UTF16),
+            1,
+            "between the base and its mark"
+        );
     }
 
     #[test]
     fn a_line_break_is_not_on_its_line_so_crlf_ends_a_line_before_the_return() {
         let text = "ab\r\ncd\r\n";
         for encoding in [UTF8, UTF16] {
-            assert_eq!(position_at(text, "cd", encoding), at(1, 0), "the line after a CRLF");
+            assert_eq!(
+                position_at(text, "cd", encoding),
+                at(1, 0),
+                "the line after a CRLF"
+            );
             // The end of the first line is before the return, and so is anything inside the break.
             assert_eq!(position_of(&snapshot(text), 2, encoding), at(0, 2));
-            assert_eq!(position_of(&snapshot(text), 3, encoding), at(0, 2), "between the return and the feed");
+            assert_eq!(
+                position_of(&snapshot(text), 3, encoding),
+                at(0, 2),
+                "between the return and the feed"
+            );
             assert_eq!(byte_of(&snapshot(text), at(0, 2), encoding), 2);
-            assert_eq!(byte_of(&snapshot(text), at(0, 3), encoding), 2, "past the end of the line is its end");
+            assert_eq!(
+                byte_of(&snapshot(text), at(0, 3), encoding),
+                2,
+                "past the end of the line is its end"
+            );
             assert_eq!(byte_of(&snapshot(text), at(0, 100), encoding), 2);
         }
     }
@@ -190,15 +227,31 @@ mod tests {
         let text = "ab\n\u{1f600}c\nlast";
         let snapshot = snapshot(text);
         for encoding in [UTF8, UTF16] {
-            assert_eq!(byte_of(&snapshot, at(0, 50), encoding), 2, "past the end of a line");
-            assert_eq!(byte_of(&snapshot, at(2, 50), encoding), text.len(), "past the end of the last line");
-            assert_eq!(byte_of(&snapshot, at(40, 0), encoding), text.len(), "past the last line");
+            assert_eq!(
+                byte_of(&snapshot, at(0, 50), encoding),
+                2,
+                "past the end of a line"
+            );
+            assert_eq!(
+                byte_of(&snapshot, at(2, 50), encoding),
+                text.len(),
+                "past the end of the last line"
+            );
+            assert_eq!(
+                byte_of(&snapshot, at(40, 0), encoding),
+                text.len(),
+                "past the last line"
+            );
         }
         let emoji = text.find('\u{1f600}').unwrap();
         // Inside the emoji: its second unit of UTF-16, and its third byte.
         assert_eq!(byte_of(&snapshot, at(1, 1), UTF16), emoji);
         assert_eq!(byte_of(&snapshot, at(1, 2), UTF8), emoji);
-        assert_eq!(position_of(&snapshot, emoji + 2, UTF8), at(1, 0), "a byte inside a character");
+        assert_eq!(
+            position_of(&snapshot, emoji + 2, UTF8),
+            at(1, 0),
+            "a byte inside a character"
+        );
         assert_eq!(position_of(&snapshot, emoji + 2, UTF16), at(1, 0));
     }
 
@@ -208,21 +261,39 @@ mod tests {
         let text = format!("short\n{line}\nafter");
         let snapshot = snapshot(&text);
         let end_of_line = text.find("\nafter").unwrap();
-        assert_eq!(position_of(&snapshot, end_of_line, UTF8), at(1, line.len() as u32));
-        assert_eq!(position_of(&snapshot, end_of_line, UTF16), at(1, (60_000 * 2 + 2) as u32));
-        assert_eq!(byte_of(&snapshot, at(1, (60_000 * 2 + 2) as u32), UTF16), end_of_line);
+        assert_eq!(
+            position_of(&snapshot, end_of_line, UTF8),
+            at(1, line.len() as u32)
+        );
+        assert_eq!(
+            position_of(&snapshot, end_of_line, UTF16),
+            at(1, (60_000 * 2 + 2) as u32)
+        );
+        assert_eq!(
+            byte_of(&snapshot, at(1, (60_000 * 2 + 2) as u32), UTF16),
+            end_of_line
+        );
         assert_eq!(position_at(&text, "after", UTF16), at(2, 0));
     }
 
     #[test]
     fn a_text_held_in_many_chunks_is_measured_the_same() {
-        let text: String = (0..3000).map(|n| format!("line {n} \u{e9}\u{1f600}\n")).collect();
+        let text: String = (0..3000)
+            .map(|n| format!("line {n} \u{e9}\u{1f600}\n"))
+            .collect();
         let snapshot = snapshot(&text);
         assert!(snapshot.chunk_count() > 2, "the text is in several chunks");
         for encoding in [UTF8, UTF16] {
-            for byte in (0..text.len()).step_by(997).filter(|byte| text.is_char_boundary(*byte)) {
+            for byte in (0..text.len())
+                .step_by(997)
+                .filter(|byte| text.is_char_boundary(*byte))
+            {
                 let position = position_of(&snapshot, byte, encoding);
-                assert_eq!(byte_of(&snapshot, position, encoding), byte, "{encoding:?} at byte {byte}");
+                assert_eq!(
+                    byte_of(&snapshot, position, encoding),
+                    byte,
+                    "{encoding:?} at byte {byte}"
+                );
             }
         }
     }
@@ -238,7 +309,11 @@ mod tests {
                 // A byte inside a line break comes back as the end of its line's text.
                 let in_break = text[..byte].ends_with('\r') && text[byte..].starts_with('\n');
                 if in_break {
-                    assert_eq!(back, byte - 1, "{encoding:?} between a return and a feed at {byte}");
+                    assert_eq!(
+                        back,
+                        byte - 1,
+                        "{encoding:?} between a return and a feed at {byte}"
+                    );
                 } else {
                     assert_eq!(back, byte, "{encoding:?} at byte {byte}: {position:?}");
                 }

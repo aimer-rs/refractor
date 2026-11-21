@@ -6,13 +6,11 @@ pub fn horizontal(color: Color) -> impl Widget {
         .width(Dimension::Percent(100.0))
         .height(1)
         .box_child(
-            Container::new()
-                .color(color)
-                .child(
-                    SizedBox::new()
-                        .width(Dimension::Percent(100.0))
-                        .height(1),
-                ),
+            Container::new().color(color).child(
+                SizedBox::new()
+                    .width(Dimension::Percent(100.0))
+                    .height(1),
+            ),
         )
 }
 
@@ -22,12 +20,10 @@ pub fn vertical(color: Color) -> impl Widget {
         .width(1)
         .height(Dimension::Percent(100.0))
         .box_child(
-            Container::new()
-                .color(color)
-                .child(
-                    SizedBox::new()
-                        .width(1)
-                        .height(Dimension::Percent(100.0)),
-                ),
+            Container::new().color(color).child(
+                SizedBox::new()
+                    .width(1)
+                    .height(Dimension::Percent(100.0)),
+            ),
         )
 }

@@ -38,7 +38,11 @@ mod tests {
 
     #[test]
     fn a_server_that_is_not_there_says_so_at_once_and_does_not_keep_the_request() {
-        let lsp = Lsp::with_starter(PathBuf::from("/project"), Box::new(|_| Err(std::io::Error::other("none"))), true);
+        let lsp = Lsp::with_starter(
+            PathBuf::from("/project"),
+            Box::new(|_| Err(std::io::Error::other("none"))),
+            true,
+        );
         let source = LspSource::new(lsp, PathBuf::from("/project/src/main.rs"));
         let said = Rc::new(Cell::new(None));
         let into = Rc::clone(&said);

@@ -6,6 +6,7 @@
 //! are left and not a trip to the server. Where the server cannot be asked, the keywords of the language are what
 //! is offered.
 
+use super::call::Call;
 use super::keywords::rust_keywords;
 use super::menu::{Menu, MenuCell};
 use super::rank::rank;
@@ -13,7 +14,9 @@ use super::word::{Word, word_before};
 use crate::document::Language;
 use crate::lsp::{Answer, Item};
 use aimer::events::element::NamedKey;
+use aimer::input::input::TextSnapshot;
 use aimer::input::{TextEditingController, TextEditingValue};
+use std::borrow::Cow;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::ops::Range;
@@ -82,7 +85,11 @@ pub struct Completer {
 }
 
 impl Completer {
-    pub fn new(language: Language, controller: TextEditingController, source: Option<Rc<dyn Source>>) -> Rc<Self> {
+    pub fn new(
+        language: Language,
+        controller: TextEditingController,
+        source: Option<Rc<dyn Source>>,
+    ) -> Rc<Self> {
         Rc::new_cyclic(|me: &Weak<Completer>| {
             let menu: Rc<MenuCell> = Rc::default();
             let picked = me.clone();
@@ -98,18 +105,22 @@ impl Completer {
                 }
             }));
             Self {
-            language,
-            last: RefCell::new(controller.value()),
-            controller,
-            menu,
-            accepting: Cell::new(false),
-            // Only Rust has a source: the server is run for it and for no other language.
-            source: source.filter(|_| language == Language::Rust),
-            keywords: Rc::new(if language == Language::Rust { rust_keywords() } else { Vec::new() }),
-            cache: RefCell::new(None),
-            serials: Cell::new(0),
-            generation: Cell::new(0),
-            me: me.clone(),
+                language,
+                last: RefCell::new(controller.value()),
+                controller,
+                menu,
+                accepting: Cell::new(false),
+                // Only Rust has a source: the server is run for it and for no other language.
+                source: source.filter(|_| language == Language::Rust),
+                keywords: Rc::new(if language == Language::Rust {
+                    rust_keywords()
+                } else {
+                    Vec::new()
+                }),
+                cache: RefCell::new(None),
+                serials: Cell::new(0),
+                generation: Cell::new(0),
+                me: me.clone(),
             }
         })
     }
@@ -135,12 +146,17 @@ impl Completer {
             self.close();
             return;
         }
-        let Some(word) = word_before(&value.snapshot(), selection.start).filter(Word::is_completable) else {
+        let Some(word) =
+            word_before(&value.snapshot(), selection.start).filter(Word::is_completable)
+        else {
             self.close();
             return;
         };
         let (usable, incomplete) = match self.cache.borrow().as_ref() {
-            Some(cache) => (cache.start == word.start && word.text.starts_with(&cache.requested), cache.incomplete),
+            Some(cache) => (
+                cache.start == word.start && word.text.starts_with(&cache.requested),
+                cache.incomplete,
+            ),
             None => (false, false),
         };
         // What was answered for the word as it was holds for the word as it is, if it has only grown: it is shown
@@ -212,7 +228,16 @@ impl Completer {
         };
         // What the items replace begins where the word does. The server's own range says, and a server whose
         // idea of the word is not ours is not one that can be filtered by it.
-        let start = answer.items.iter().find_map(|item| item.edit.range.as_ref().map(|range| range.start)).unwrap_or(word.start);
+        let start = answer
+            .items
+            .iter()
+            .find_map(|item| {
+                item.edit
+                    .range
+                    .as_ref()
+                    .map(|range| range.start)
+            })
+            .unwrap_or(word.start);
         if answer.items.is_empty() || start != word.start {
             *self.cache.borrow_mut() = None;
             self.menu.set(None);
@@ -239,7 +264,11 @@ impl Completer {
                 return;
             };
             // A word that has grown fits what fitted it before and nothing else.
-            let within = cache.view.as_ref().filter(|(seen, _)| word.starts_with(seen.as_str())).map(|(_, view)| view.as_slice());
+            let within = cache
+                .view
+                .as_ref()
+                .filter(|(seen, _)| word.starts_with(seen.as_str()))
+                .map(|(_, view)| view.as_slice());
             let mut view = rank(&cache.list, within, word, true);
             cache.view = Some((word.to_owned(), view.clone()));
             // The word as it is typed is not offered where it is all there is: there is nothing to add.
@@ -257,7 +286,10 @@ impl Completer {
     /// Asks for the other edits of the item that is chosen, if it has some to give that are not had, so that they are
     /// there when it is put in: a moment after it is chosen, which is long before a key is pressed to put it in.
     fn resolve_chosen(&self) {
-        let Some((index, item)) = self.menu.with(|menu| menu.map(|menu| (menu.chosen_index(), menu.chosen().clone()))) else {
+        let Some((index, item)) = self
+            .menu
+            .with(|menu| menu.map(|menu| (menu.chosen_index(), menu.chosen().clone())))
+        else {
             return;
         };
         let (Some(source), Some(_)) = (&self.source, &item.resolve) else {
@@ -281,7 +313,12 @@ impl Completer {
     /// The other edits of the item `index` of the answer `serial`, which is not the answer that is kept if the word
     /// has been typed on since.
     fn resolved(&self, serial: u64, index: u32, edits: Vec<(Range<usize>, String)>) {
-        if let Some(cache) = self.cache.borrow_mut().as_mut().filter(|cache| cache.serial == serial) {
+        if let Some(cache) = self
+            .cache
+            .borrow_mut()
+            .as_mut()
+            .filter(|cache| cache.serial == serial)
+        {
             cache.resolved.insert(index, edits);
         }
     }
@@ -294,7 +331,11 @@ impl Completer {
             }
         }
         // Keywords are said of a word that is begun: after a `.` there is no keyword to say.
-        let menu = if word.text.is_empty() { None } else { Menu::new(Rc::clone(&self.keywords), view, word.start, &word.text) };
+        let menu = if word.text.is_empty() {
+            None
+        } else {
+            Menu::new(Rc::clone(&self.keywords), view, word.start, &word.text)
+        };
         self.menu.set(menu);
     }
 
@@ -312,7 +353,11 @@ impl Completer {
             NamedKey::Escape => self.close(),
             // A word that is typed whole, and is the item that is chosen, is not completed by Return: it is what
             // Return would have been without the menu, which is a new line.
-            NamedKey::Enter if self.menu.with(|menu| menu.is_some_and(|menu| changes_nothing(menu.chosen(), menu.word()))) => {
+            NamedKey::Enter
+                if self.menu.with(|menu| {
+                    menu.is_some_and(|menu| changes_nothing(menu.chosen(), menu.word()))
+                }) =>
+            {
                 self.close();
                 return false;
             }
@@ -339,8 +384,17 @@ impl Completer {
         let start = menu.start();
         // What the server has said of the item since it was chosen, if it has said it by now: an item that is put in
         // before that has the edits it came with, which are not the line that imports it.
-        let resolved =
-            self.cache.borrow().as_ref().and_then(|cache| cache.resolved.get(&menu.chosen_index()).cloned()).unwrap_or_default();
+        let resolved = self
+            .cache
+            .borrow()
+            .as_ref()
+            .and_then(|cache| {
+                cache
+                    .resolved
+                    .get(&menu.chosen_index())
+                    .cloned()
+            })
+            .unwrap_or_default();
         // The other changes are about the text as it was asked about, in which what is before the word is as it is
         // now. One that is not wholly before it is not known to be where it was, and is not made.
         let mut edits: Vec<(Range<usize>, &str)> = item
@@ -351,17 +405,42 @@ impl Completer {
             .filter(|(range, _)| range.end <= start)
             .map(|(range, text)| (range.clone(), text.as_str()))
             .collect();
+        // A function is called: its brackets are put after it, and the caret goes into them where there is an argument to type.
+        let snapshot = self.controller.snapshot();
+        let call = Call::parentheses(item, snapshot.byte_at(caret), &line_start(&snapshot, start));
+        let text: Cow<str> = match call {
+            Some(_) => Cow::Owned(format!("{}()", item.edit.text)),
+            None => Cow::Borrowed(item.edit.text.as_str()),
+        };
         // Those begin where the word does or before it, so the word's is the last of them in the text.
         let word_is = edits.len();
-        edits.push((start..caret, item.edit.text.as_str()));
+        edits.push((start..caret, text.as_ref()));
         self.accepting.set(true);
         if !self.controller.replace_ranges(&edits, word_is) {
             // Changes that overlap are not made, and the word still is.
-            self.controller.replace_range(start..caret, &item.edit.text);
+            self.controller
+                .replace_range(start..caret, &text);
+        }
+        if call == Some(true) {
+            // Between the brackets: the edit left the caret after them, which are the last two bytes of the word.
+            let end = self.controller.value().selection().range().end;
+            self.controller.select_bytes(end - 1, end - 1);
         }
         self.accepting.set(false);
         self.close();
     }
+}
+
+/// The start of the line that `at` is on, up to `at`, as far as [`Call::IMPORT_LOOKBEHIND`] bytes of it: what tells that the
+/// word at `at` is in an import.
+fn line_start(text: &TextSnapshot, at: usize) -> String {
+    let line = text.line_range(text.byte_to_line(at.min(text.len())));
+    let end = at.min(line.start + Call::IMPORT_LOOKBEHIND);
+    let bytes: Vec<u8> = (line.start..end)
+        .map_while(|byte| text.byte_at(byte))
+        .collect();
+    // A cut in the middle of a character is only a character that is not an import.
+    String::from_utf8_lossy(&bytes).into_owned()
 }
 
 /// Whether putting `item` in place of `word` would do nothing: it is the word, and there is nothing else it asks for.

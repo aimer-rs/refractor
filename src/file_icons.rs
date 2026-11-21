@@ -112,10 +112,7 @@ pub fn file_icon(name: &str) -> &'static StaticSvg {
 /// The icon of a folder called `name`. Material Icon Theme has no open variants in `assets/icons`,
 /// so an open folder is told from a closed one by the chevron in front of it.
 pub fn folder_icon(name: &str) -> &'static StaticSvg {
-    match name
-        .to_ascii_lowercase()
-        .as_str()
-    {
+    match name.to_ascii_lowercase().as_str() {
         ".claude" => icon!("folder-claude"),
         ".config" => icon!("folder-config"),
         ".git" => icon!("folder-git"),
