@@ -49,7 +49,9 @@ impl Literal {
         if start == floor && floor > 0 {
             return None;
         }
-        (start..at).map(|byte| text.byte_at(byte)).collect()
+        (start..at)
+            .map(|byte| text.byte_at(byte))
+            .collect()
     }
 
     /// Where the end of `line` is: in code or in which kind of string.
@@ -66,7 +68,10 @@ impl Literal {
                     }
                     if byte == b'"' {
                         state = match Self::raw_marks(&line[..at]) {
-                            Some(hashes) => Within::Raw { hashes, closing: None },
+                            Some(hashes) => Within::Raw {
+                                hashes,
+                                closing: None,
+                            },
                             None => Within::Text,
                         };
                     }
@@ -92,7 +97,10 @@ impl Literal {
                             at += hashes;
                         } else if at + 1 + marks == line.len() {
                             // The line ends with a quote that has fewer marks than it needs: it has begun to end.
-                            state = Within::Raw { hashes, closing: Some(marks) };
+                            state = Within::Raw {
+                                hashes,
+                                closing: Some(marks),
+                            };
                         }
                     }
                 }
@@ -104,7 +112,11 @@ impl Literal {
 
     /// What a `"` typed after `line` begins.
     pub fn start(line: &[u8]) -> Start {
-        let hashes = line.iter().rev().take_while(|&&byte| byte == b'#').count();
+        let hashes = line
+            .iter()
+            .rev()
+            .take_while(|&&byte| byte == b'#')
+            .count();
         let end = line.len() - hashes;
         match Self::prefix_before(line, end) {
             Some((_, true)) if hashes > 0 => Start::Raw { hashes },
@@ -115,7 +127,11 @@ impl Literal {
 
     /// The marks of the raw string that a `"` after `line` opens, if it is one.
     fn raw_marks(line: &[u8]) -> Option<usize> {
-        let hashes = line.iter().rev().take_while(|&&byte| byte == b'#').count();
+        let hashes = line
+            .iter()
+            .rev()
+            .take_while(|&&byte| byte == b'#')
+            .count();
         match Self::prefix_before(line, line.len() - hashes) {
             Some((_, true)) => Some(hashes),
             _ => None,

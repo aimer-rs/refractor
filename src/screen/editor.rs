@@ -1,5 +1,6 @@
 mod breadcrumb;
 mod completion_caret;
+mod context_menu;
 mod definition;
 mod editor_area;
 mod file_row;
@@ -9,6 +10,7 @@ mod lsp_badge;
 mod pane;
 mod problem_section;
 mod problems_panel;
+mod rename_card;
 mod search_go;
 mod search_layer;
 mod search_popup;
@@ -27,13 +29,13 @@ use self::editor_area::EditorArea;
 use self::search_layer::SearchLayer;
 use self::side_panel::{SidePanel, edge};
 use self::status_bar::StatusBar;
-use crate::theme::CodeTheme;
 use crate::settings::{AutoSave, Settings};
+use crate::theme::CodeTheme;
 use crate::workspace::{Workspace, refresh_status, save_document};
 use aimer::style::Theme;
 use aimer::{
-    BuildContext, Column, Container, Dimension, Direction, Expanded, ProviderContext, ProviderHandle,
-    Resizable, Row, Shortcuts, SizedBox, StatelessWidget, Widget,
+    BuildContext, Column, Container, Dimension, Direction, Expanded, ProviderContext,
+    ProviderHandle, Resizable, Row, Shortcuts, SizedBox, StatelessWidget, Widget,
 };
 
 /// How wide the file tree starts, and the limits of dragging its right edge, in logical pixels.
@@ -61,11 +63,15 @@ impl StatelessWidget for EditorScreen {
         let theme = *CodeTheme::of(ctx);
         let store = ProviderHandle::<Workspace>::of(ctx);
         // Files are saved by themselves as the settings say, with what the save key saves with.
-        let (way, delay) = ctx.select::<Settings, (AutoSave, std::time::Duration)>(|settings| (settings.auto_save(), settings.auto_save_delay()));
+        let (way, delay) = ctx.select::<Settings, (AutoSave, std::time::Duration)>(|settings| {
+            (settings.auto_save(), settings.auto_save_delay())
+        });
         let auto_save = store.read().auto_save();
         auto_save.configure(way, delay);
         let saving = store.clone();
-        auto_save.set_saver(std::rc::Rc::new(move |document| save_document(&saving, document)));
+        auto_save.set_saver(std::rc::Rc::new(move |document| {
+            save_document(&saving, document)
+        }));
         let listing = store.clone();
         auto_save.watch_window(std::rc::Rc::new(move || listing.read().documents.clone()));
         // What something else changes in an open file is brought into the editor, a moment after it is changed.

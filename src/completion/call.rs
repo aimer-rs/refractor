@@ -56,25 +56,30 @@ impl Call {
             return None;
         }
         let mut depth = 0usize;
-        let close = detail[open..].char_indices().find_map(|(at, ch)| {
-            match ch {
-                '(' => depth += 1,
-                ')' => {
-                    depth -= 1;
-                    if depth == 0 {
-                        return Some(open + at);
+        let close = detail[open..]
+            .char_indices()
+            .find_map(|(at, ch)| {
+                match ch {
+                    '(' => depth += 1,
+                    ')' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            return Some(open + at);
+                        }
                     }
+                    _ => {}
                 }
-                _ => {}
-            }
-            None
-        })?;
+                None
+            })?;
         let rest = detail[close + 1..].trim_start();
         let returns = rest
             .strip_prefix("->")
             .map(str::trim)
             .filter(|returns| !returns.is_empty());
-        Some(Signature { params: &detail[open..=close], returns })
+        Some(Signature {
+            params: &detail[open..=close],
+            returns,
+        })
     }
 
     /// Whether a line that begins with `before_word` is an import: a name in it is not called.
@@ -207,7 +212,10 @@ mod tests {
             Some(("(a: u8, b: Vec<(u8, u8)>)", Some("Option<(u8, u8)>")))
         );
         assert_eq!(split("fn()"), Some(("()", None)), "returns nothing");
-        assert_eq!(split("fn(&self) -> String"), Some(("(&self)", Some("String"))));
+        assert_eq!(
+            split("fn(&self) -> String"),
+            Some(("(&self)", Some("String")))
+        );
         assert_eq!(
             split("fn(self, f: impl Fn(u8) -> u8) -> bool"),
             Some(("(self, f: impl Fn(u8) -> u8)", Some("bool"))),
@@ -218,13 +226,30 @@ mod tests {
             Some(("(a: u8)", Some("impl Fn() -> u8"))),
             "the first arrow after the arguments is the signature's, and what follows it is all it returns"
         );
-        assert_eq!(split("unsafe fn(buf: *mut u8) -> String"), Some(("(buf: *mut u8)", Some("String"))), "a qualified function");
-        assert_eq!(split("fn(x: u8) where T: Copy"), Some(("(x: u8)", None)), "a clause that is not a return");
+        assert_eq!(
+            split("unsafe fn(buf: *mut u8) -> String"),
+            Some(("(buf: *mut u8)", Some("String"))),
+            "a qualified function"
+        );
+        assert_eq!(
+            split("fn(x: u8) where T: Copy"),
+            Some(("(x: u8)", None)),
+            "a clause that is not a return"
+        );
     }
 
     #[test]
     fn what_is_not_the_signature_of_a_function_has_none() {
-        for detail in ["", "keyword", "Vec<T>", "macro_rules! println", "struct Foo(u8)", "fn(unclosed", "(a, b)", "const X: (u8, u8)"] {
+        for detail in [
+            "",
+            "keyword",
+            "Vec<T>",
+            "macro_rules! println",
+            "struct Foo(u8)",
+            "fn(unclosed",
+            "(a, b)",
+            "const X: (u8, u8)",
+        ] {
             assert!(Call::signature(detail).is_none(), "{detail:?}");
         }
     }

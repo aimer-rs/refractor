@@ -11,8 +11,8 @@ use aimer::input::mouse_region::MouseRegion;
 use aimer::share::ShareRef;
 use aimer::style::{BorderRadius, LayoutSpacing, TextAlign, TextOverflow};
 use aimer::{
-    BoxAlignment, BuildContext, Color, Container, Dimension, Expanded, ProviderHandle, RichText, Row as Line, SizedBox, State,
-    StateUpdater, StateView, StatefulWidget, Text, TextSpan, Widget,
+    BoxAlignment, BuildContext, Color, Container, Dimension, Expanded, ProviderHandle, RichText,
+    Row as Line, SizedBox, State, StateUpdater, StateView, StatefulWidget, Text, TextSpan, Widget,
 };
 use std::rc::Rc;
 
@@ -31,8 +31,18 @@ pub struct UsageRowView {
 }
 
 impl UsageRowView {
-    pub fn new(row: ShareRef<UsageRow>, theme: CodeTheme, store: ProviderHandle<Workspace>, usages: Rc<Usages>) -> Self {
-        Self { row, theme, store, usages }
+    pub fn new(
+        row: ShareRef<UsageRow>,
+        theme: CodeTheme,
+        store: ProviderHandle<Workspace>,
+        usages: Rc<Usages>,
+    ) -> Self {
+        Self {
+            row,
+            theme,
+            store,
+            usages,
+        }
     }
 }
 
@@ -55,7 +65,9 @@ impl UsageRowViewState {
         self.usages.on_row_change(
             self.row.index,
             Rc::new(move || {
-                let alive = updater.try_set_state(|state| state.changes += 1).is_some();
+                let alive = updater
+                    .try_set_state(|state| state.changes += 1)
+                    .is_some();
                 if alive {
                     aimer::events::window::request_animation_frame();
                 }
@@ -100,12 +112,10 @@ impl State<UsageRowView> for UsageRowViewState {
         let (theme, index) = (this.theme, this.row.index);
         let (number, pieces) = (this.row.number, this.row.pieces.clone());
         let (store, usages) = (this.store.clone(), Rc::clone(&this.usages));
-        let name = this
-            .row
-            .place
-            .path
-            .file_name()
-            .map_or_else(|| this.row.file.to_string(), |name| name.to_string_lossy().into_owned());
+        let name = this.row.place.path.file_name().map_or_else(
+            || this.row.file.to_string(),
+            |name| name.to_string_lossy().into_owned(),
+        );
         // A click, a deep press of the trackpad and Return are the same: go there. A button that does not take the deep press leaves it
         // to what is behind the card, so a firm click would go to the text under the list and not to the place that was pressed.
         let go: Rc<dyn Fn()> = {
@@ -130,61 +140,66 @@ impl State<UsageRowView> for UsageRowViewState {
                     .on_press(move || on_press())
                     .on_force_press(move || on_deep_press())
                     .build(move |_state| {
-                // The row that is chosen is marked in the pink of the app, as softly as a list of this many rows is read, and its line
-                // number, which is faint, is as bright as the text on it.
-                let background = if selected {
-                    theme.marker.with_alpha(Popup::ROW_HIGHLIGHT)
-                } else {
-                    Color::Transparent
-                };
-                let code = RichText::new(
-                    TextSpan::new("").children(
-                        pieces
-                            .iter()
-                            .map(|(text, style)| TextSpan::new(text.as_str()).style(style.clone())),
-                    ),
-                )
-                .text_style(text().color(theme.code).text_overflow(TextOverflow::Clip));
-                SizedBox::new()
-                    .width(Dimension::Percent(100.0))
-                    .height(ROW_HEIGHT)
-                    .box_child(
-                        Container::new()
+                        // The row that is chosen is marked in the pink of the app, as softly as a list of this many rows is read, and its line
+                        // number, which is faint, is as bright as the text on it.
+                        let background = if selected {
+                            theme.marker.with_alpha(Popup::ROW_HIGHLIGHT)
+                        } else {
+                            Color::Transparent
+                        };
+                        let code = RichText::new(TextSpan::new("").children(pieces.iter().map(
+                            |(text, style)| TextSpan::new(text.as_str()).style(style.clone()),
+                        )))
+                        .text_style(
+                            text()
+                                .color(theme.code)
+                                .text_overflow(TextOverflow::Clip),
+                        );
+                        SizedBox::new()
                             .width(Dimension::Percent(100.0))
-                            .padding(LayoutSpacing::new().left(8).right(8))
-                            .decoration([BorderRadius::all(4).notype(), background.notype()])
-                            .child(
-                                Line::new()
-                                    .vertical_alignment(BoxAlignment::Center)
-                                    .gaps(LayoutSpacing::all(8))
-                                    .children([
-                                        material(file_icon(&name), ICON).boxed(),
-                                        SizedBox::new()
-                                            .width(FILE_COLUMN)
-                                            .box_child(
-                                                Text::new(name.clone()).text_style(
-                                                    text()
-                                                        .color(theme.text)
-                                                        .text_overflow(TextOverflow::Clip),
-                                                ),
-                                            )
-                                            .boxed(),
-                                        SizedBox::new()
-                                            .width(NUMBER_COLUMN)
-                                            .box_child(
-                                                Text::new(number.to_string())
-                                                    .text_align(TextAlign::TopRight)
-                                                    .text_style(text().color(if selected {
-                                                        theme.text
-                                                    } else {
-                                                        theme.line_number
-                                                    })),
-                                            )
-                                            .boxed(),
-                                        Expanded::new().child(code).boxed(),
-                                    ]),
-                            ),
-                    )
+                            .height(ROW_HEIGHT)
+                            .box_child(
+                                Container::new()
+                                    .width(Dimension::Percent(100.0))
+                                    .padding(LayoutSpacing::new().left(8).right(8))
+                                    .decoration([
+                                        BorderRadius::all(4).notype(),
+                                        background.notype(),
+                                    ])
+                                    .child(
+                                        Line::new()
+                                            .vertical_alignment(BoxAlignment::Center)
+                                            .gaps(LayoutSpacing::all(8))
+                                            .children([
+                                                material(file_icon(&name), ICON).boxed(),
+                                                SizedBox::new()
+                                                    .width(FILE_COLUMN)
+                                                    .box_child(
+                                                        Text::new(name.clone()).text_style(
+                                                            text()
+                                                                .color(theme.text)
+                                                                .text_overflow(TextOverflow::Clip),
+                                                        ),
+                                                    )
+                                                    .boxed(),
+                                                SizedBox::new()
+                                                    .width(NUMBER_COLUMN)
+                                                    .box_child(
+                                                        Text::new(number.to_string())
+                                                            .text_align(TextAlign::TopRight)
+                                                            .text_style(text().color(
+                                                                if selected {
+                                                                    theme.text
+                                                                } else {
+                                                                    theme.line_number
+                                                                },
+                                                            )),
+                                                    )
+                                                    .boxed(),
+                                                Expanded::new().child(code).boxed(),
+                                            ]),
+                                    ),
+                            )
                     }),
             )
     }

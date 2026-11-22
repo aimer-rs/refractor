@@ -6,7 +6,10 @@ use std::rc::Rc;
 
 use aimer::input::input::SpanStyle;
 use aimer::style::{FontWeight, LayoutSpacing, TextDecoration, TextStyle};
-use aimer::{AnyWidget, Color, Container, MarkdownLivePreview, MarkdownTheme, MarkdownViewer, Scrollable, Widget};
+use aimer::{
+    AnyWidget, Color, Container, MarkdownLivePreview, MarkdownTheme, MarkdownViewer, Scrollable,
+    Widget,
+};
 
 use crate::doc_comments::DocLink;
 use crate::fonts;
@@ -185,7 +188,9 @@ pub fn hover_viewer(markdown: &str, theme: &MarkdownTheme, scrollable: bool) -> 
         .padding(LayoutSpacing::all(0_u32));
     if scrollable {
         // Scrolled by an area of its own, as the list of files is, round the document that does not scroll.
-        Scrollable::new().child(Container::new().child(viewer)).boxed()
+        Scrollable::new()
+            .child(Container::new().child(viewer))
+            .boxed()
     } else {
         viewer.boxed()
     }

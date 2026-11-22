@@ -18,7 +18,14 @@ pub enum Tab {
 }
 
 impl Tab {
-    pub const ALL: [Tab; 6] = [Tab::All, Tab::Types, Tab::Files, Tab::Symbols, Tab::Actions, Tab::Text];
+    pub const ALL: [Tab; 6] = [
+        Tab::All,
+        Tab::Types,
+        Tab::Files,
+        Tab::Symbols,
+        Tab::Actions,
+        Tab::Text,
+    ];
     /// How many names, and how many lines of text, the All tab lists at most: it is a glance over everything, and each of the
     /// other tabs is where to look at one kind further.
     pub const NAMES_IN_ALL: usize = 30;
@@ -37,7 +44,10 @@ impl Tab {
 
     /// The tab `delta` tabs after this one, going round the ends: before is negative.
     pub fn step(self, delta: isize) -> Tab {
-        let at = Self::ALL.iter().position(|tab| *tab == self).unwrap_or(0);
+        let at = Self::ALL
+            .iter()
+            .position(|tab| *tab == self)
+            .unwrap_or(0);
         Self::ALL[(at as isize + delta).rem_euclid(Self::ALL.len() as isize) as usize]
     }
 
@@ -72,7 +82,10 @@ pub enum Kind {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Target {
-    File { path: PathBuf, at: Option<(usize, usize)> },
+    File {
+        path: PathBuf,
+        at: Option<(usize, usize)>,
+    },
     Place(Place),
     Action(ActionId),
 }
@@ -95,6 +108,8 @@ pub struct Parts {
     pub actions: Vec<(Action, super::Match)>,
     pub text: Vec<TextHit>,
     pub pattern: Pattern,
+    /// The line and column typed after the path (`path:line:column`), which the files are gone to.
+    pub at: Option<(usize, usize)>,
 }
 
 impl Hit {
@@ -111,7 +126,15 @@ impl Hit {
             marked,
             // What it is in, as the server says it; and when it says nothing, the file, which is as good a place to look.
             detail: symbol.container.as_ref().map_or_else(
-                || symbol.place.path.strip_prefix(root).unwrap_or(&symbol.place.path).display().to_string(),
+                || {
+                    symbol
+                        .place
+                        .path
+                        .strip_prefix(root)
+                        .unwrap_or(&symbol.place.path)
+                        .display()
+                        .to_string()
+                },
                 |container| format!("in {container}"),
             ),
             target: Target::Place(symbol.place.clone()),
@@ -119,13 +142,16 @@ impl Hit {
         }
     }
 
-    fn of_file(file: &FileHit) -> Self {
+    fn of_file(file: &FileHit, at: Option<(usize, usize)>) -> Self {
         Self {
             kind: Kind::File,
             title: file.name.clone(),
             marked: file.marked.clone(),
             detail: file.directory.clone(),
-            target: Target::File { path: file.path.clone(), at: None },
+            target: Target::File {
+                path: file.path.clone(),
+                at,
+            },
             score: file.score,
         }
     }
@@ -148,7 +174,10 @@ impl Hit {
             title: hit.preview.clone(),
             marked: vec![hit.marked.clone()],
             detail: format!("{}:{}", shown.display(), hit.line),
-            target: Target::File { path: hit.path.clone(), at: Some((hit.line, hit.column)) },
+            target: Target::File {
+                path: hit.path.clone(),
+                at: Some((hit.line, hit.column)),
+            },
             score: 0,
         }
     }
@@ -175,19 +204,38 @@ impl Tab {
             by_score(&mut hits);
             hits
         };
-        let text = |limit: usize| parts.text.iter().take(limit).map(|hit| Hit::of_text(hit, &parts.root));
+        let text = |limit: usize| {
+            parts
+                .text
+                .iter()
+                .take(limit)
+                .map(|hit| Hit::of_text(hit, &parts.root))
+        };
         match self {
             Tab::Types => symbols(true),
             Tab::Symbols => symbols(false),
-            Tab::Files => parts.files.iter().map(Hit::of_file).collect(),
-            Tab::Actions => parts.actions.iter().map(Hit::of_action).collect(),
+            Tab::Files => parts
+                .files
+                .iter()
+                .map(|file| Hit::of_file(file, parts.at))
+                .collect(),
+            Tab::Actions => parts
+                .actions
+                .iter()
+                .map(Hit::of_action)
+                .collect(),
             Tab::Text => text(usize::MAX).collect(),
             Tab::All => {
                 let mut names: Vec<Hit> = parts
                     .symbols
                     .iter()
                     .map(|symbol| Hit::of_symbol(symbol, &parts.pattern, &parts.root))
-                    .chain(parts.files.iter().map(Hit::of_file))
+                    .chain(
+                        parts
+                            .files
+                            .iter()
+                            .map(|file| Hit::of_file(file, parts.at)),
+                    )
                     .chain(parts.actions.iter().map(Hit::of_action))
                     .collect();
                 by_score(&mut names);

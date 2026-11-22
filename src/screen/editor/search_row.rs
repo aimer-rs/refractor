@@ -10,8 +10,8 @@ use aimer::input::button::Button;
 use aimer::input::mouse_region::MouseRegion;
 use aimer::style::{BorderRadius, FontWeight, LayoutSpacing, TextOverflow, TextStyle, Theme};
 use aimer::{
-    AnyWidget, BoxAlignment, BuildContext, Center, Color, Container, Dimension, Expanded, Icons, RichText, Row, SizedBox, SpanStyle,
-    StatelessWidget, Text, TextSpan, Widget,
+    AnyWidget, BoxAlignment, BuildContext, Center, Color, Container, Dimension, Expanded, Icons,
+    RichText, Row, SizedBox, SpanStyle, StatelessWidget, Text, TextSpan, Widget,
 };
 use std::ops::Range;
 use std::rc::Rc;
@@ -37,8 +37,20 @@ pub struct SearchRow {
 }
 
 impl SearchRow {
-    pub fn new(hit: Hit, index: usize, selected: bool, choose: Rc<dyn Fn(usize)>, go: Rc<dyn Fn(usize)>) -> Self {
-        Self { hit, index, selected, choose, go }
+    pub fn new(
+        hit: Hit,
+        index: usize,
+        selected: bool,
+        choose: Rc<dyn Fn(usize)>,
+        go: Rc<dyn Fn(usize)>,
+    ) -> Self {
+        Self {
+            hit,
+            index,
+            selected,
+            choose,
+            go,
+        }
     }
 }
 
@@ -77,32 +89,51 @@ fn mark(hit: &Hit, theme: &CodeTheme) -> AnyWidget {
 
 /// The widgets of the row: the mark, the name and, if there is one, where it is.
 fn line(hit: &Hit, theme: &CodeTheme) -> Vec<AnyWidget> {
-    let text = |color: Color| -> TextStyle { fonts::ui().font_size(UI_SIZE).color(color).text_overflow(TextOverflow::Clip) };
+    let text = |color: Color| -> TextStyle {
+        fonts::ui()
+            .font_size(UI_SIZE)
+            .color(color)
+            .text_overflow(TextOverflow::Clip)
+    };
     // A text hit is a line of code, which is read in the font of code.
     let title_style = if hit.kind == Kind::Text {
-        TextStyle::new().font_family(fonts::code_family()).font_size(12).color(theme.code).text_overflow(TextOverflow::Clip)
+        TextStyle::new()
+            .font_family(fonts::code_family())
+            .font_size(12)
+            .color(theme.code)
+            .text_overflow(TextOverflow::Clip)
     } else {
         text(theme.text)
     };
-    let spans = runs(&hit.title, &hit.marked).into_iter().map(|(range, marked)| {
-        let piece = TextSpan::new(&hit.title[range]);
-        if marked {
-            let mut style = SpanStyle::new().color(theme.marker);
-            style.font_weight = Some(FontWeight::Bold);
-            piece.style(style)
-        } else {
-            piece
-        }
-    });
+    let spans = runs(&hit.title, &hit.marked)
+        .into_iter()
+        .map(|(range, marked)| {
+            let piece = TextSpan::new(&hit.title[range]);
+            if marked {
+                let mut style = SpanStyle::new().color(theme.marker);
+                style.font_weight = Some(FontWeight::Bold);
+                piece.style(style)
+            } else {
+                piece
+            }
+        });
     let title = RichText::new(TextSpan::new("").children(spans)).text_style(title_style);
     // The name takes what the mark and the place leave; the place is as wide as it is.
     let mut line: Vec<AnyWidget> = vec![
         // The same room whatever the mark is: a badge is a little smaller than the icon of a file, and the names would not line up.
-        SizedBox::new().width(MARK).height(MARK).box_child(Center::new().box_child(mark(hit, theme))).boxed(),
+        SizedBox::new()
+            .width(MARK)
+            .height(MARK)
+            .box_child(Center::new().box_child(mark(hit, theme)))
+            .boxed(),
         Expanded::new().child(title).boxed(),
     ];
     if !hit.detail.is_empty() {
-        line.push(Text::new(hit.detail.clone()).text_style(text(theme.muted).font_size(11)).boxed());
+        line.push(
+            Text::new(hit.detail.clone())
+                .text_style(text(theme.muted).font_size(11))
+                .boxed(),
+        );
     }
     line
 }
@@ -111,24 +142,39 @@ impl StatelessWidget for SearchRow {
     fn build(&self, ctx: &BuildContext) -> impl Widget {
         let theme = *CodeTheme::of(ctx);
         let (index, selected, hit) = (self.index, self.selected, self.hit.clone());
-        let background = if selected { theme.marker.with_alpha(Popup::ROW_HIGHLIGHT) } else { Color::Transparent };
+        let background = if selected {
+            theme.marker.with_alpha(Popup::ROW_HIGHLIGHT)
+        } else {
+            Color::Transparent
+        };
         let (choose, go) = (Rc::clone(&self.choose), Rc::clone(&self.go));
         MouseRegion::new()
             .on_hover_enter(move || choose(index))
-            .box_child(Button::new().no_decor().on_press(move || go(index)).build(move |_state| {
-                SizedBox::new().width(Dimension::Percent(100.0)).height(ROW_HEIGHT).box_child(
-                    Container::new()
-                        .width(Dimension::Percent(100.0))
-                        .padding(LayoutSpacing::new().left(8).right(8))
-                        .decoration([BorderRadius::all(4).notype(), background.notype()])
-                        .child(
-                            Row::new()
-                                .vertical_alignment(BoxAlignment::Center)
-                                .gaps(LayoutSpacing::all(8))
-                                .children(line(&hit, &theme)),
-                        ),
-                )
-            }))
+            .box_child(
+                Button::new()
+                    .no_decor()
+                    .on_press(move || go(index))
+                    .build(move |_state| {
+                        SizedBox::new()
+                            .width(Dimension::Percent(100.0))
+                            .height(ROW_HEIGHT)
+                            .box_child(
+                                Container::new()
+                                    .width(Dimension::Percent(100.0))
+                                    .padding(LayoutSpacing::new().left(8).right(8))
+                                    .decoration([
+                                        BorderRadius::all(4).notype(),
+                                        background.notype(),
+                                    ])
+                                    .child(
+                                        Row::new()
+                                            .vertical_alignment(BoxAlignment::Center)
+                                            .gaps(LayoutSpacing::all(8))
+                                            .children(line(&hit, &theme)),
+                                    ),
+                            )
+                    }),
+            )
     }
 }
 
@@ -151,8 +197,19 @@ mod tests {
     fn a_mark_that_does_not_fit_the_title_is_left_out_and_so_is_one_inside_a_character() {
         assert_eq!(runs("abc", &[2..9]), [(0..3, false)], "past the end");
         assert_eq!(runs("abc", &[2..2]), [(0..3, false)], "nothing marked");
-        assert_eq!(runs("été", &[1..2]), [(0..5, false)], "inside the first accent");
-        assert_eq!(runs("été", &[0..2, 2..3]), [(0..2, true), (2..3, true), (3..5, false)]);
-        assert_eq!(runs("abcd", &[2..3, 0..1]), [(0..2, false), (2..3, true), (3..4, false)], "out of order");
+        assert_eq!(
+            runs("été", &[1..2]),
+            [(0..5, false)],
+            "inside the first accent"
+        );
+        assert_eq!(
+            runs("été", &[0..2, 2..3]),
+            [(0..2, true), (2..3, true), (3..5, false)]
+        );
+        assert_eq!(
+            runs("abcd", &[2..3, 0..1]),
+            [(0..2, false), (2..3, true), (3..4, false)],
+            "out of order"
+        );
     }
 }

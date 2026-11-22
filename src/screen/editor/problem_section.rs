@@ -6,11 +6,16 @@ use crate::fonts;
 use crate::hover::{Card, Fix, HoverCell, Problem};
 use crate::lsp::Weight;
 use crate::theme::CodeTheme;
+use aimer::console::info;
 use aimer::decoration::Decoration;
 use aimer::input::button::Button;
-use aimer::style::{BorderRadius, LayoutSpacing, TextOverflow};
+use aimer::style::{
+    BorderRadius, BorderSlice, BorderStyle, BoxBorder, LayoutSpacing, TextDecoration,
+    TextDecorationLine, TextDecorationStyle, TextOverflow, TextStyle,
+};
 use aimer::{
-    AnyWidget, BoxAlignment, Color, Column, Container, Dimension, Expanded, RichText, Row, SizedBox, SpanStyle, TextSpan, Widget, ZeroSizedBox,
+    AnyWidget, BoxAlignment, Color, Column, Container, Dimension, Expanded, JustifyContent,
+    NumberExt, RichText, Row, SizedBox, SpanStyle, Text, TextSpan, Widget, ZeroSizedBox, list,
 };
 use std::rc::Rc;
 
@@ -37,18 +42,35 @@ pub const MAX_WIDTH: f32 = 420.0;
 
 /// The characters of the first line of a message, with its code and the brackets it is in: what a line of the card holds.
 fn line_chars(problem: &Problem) -> usize {
-    problem.message.lines().next().unwrap_or("").chars().count() + problem.code.as_ref().map_or(0, |code| code.chars().count() + 3)
+    problem
+        .message
+        .lines()
+        .next()
+        .unwrap_or("")
+        .chars()
+        .count()
+        + problem
+            .code
+            .as_ref()
+            .map_or(0, |code| code.chars().count() + 3)
 }
 
 /// How wide the card is for `card`, which has problems: as wide as the longest of its messages, and no narrower or wider than it may be.
 pub fn card_width(card: &Card) -> f32 {
-    let widest = card.problems.iter().map(line_chars).max().unwrap_or(0) as f32;
-    (widest * CHAR_WIDTH + 2.0 * PADDING as f32 + (MARK + MARK_GAP) as f32).clamp(MIN_WIDTH, MAX_WIDTH)
+    let widest = card
+        .problems
+        .iter()
+        .map(line_chars)
+        .max()
+        .unwrap_or(0) as f32;
+    (widest * CHAR_WIDTH + 2.0 * PADDING as f32 + (MARK + MARK_GAP) as f32)
+        .clamp(MIN_WIDTH, MAX_WIDTH)
 }
 
 /// How many characters of a message fit in a line of a card as wide as `width`.
 fn chars_per_line(width: f32) -> usize {
-    (((width - 2.0 * PADDING as f32 - (MARK + MARK_GAP) as f32) / CHAR_WIDTH).floor() as usize).max(1)
+    (((width - 2.0 * PADDING as f32 - (MARK + MARK_GAP) as f32) / CHAR_WIDTH).floor() as usize)
+        .max(1)
 }
 
 /// The color a problem of this weight is marked with: the color of the line under it.
@@ -67,7 +89,11 @@ pub fn estimated_height(card: &Card, expanded: bool) -> f32 {
         return 0.0;
     }
     let per_line = chars_per_line(card_width(card));
-    let messages: f32 = card.problems.iter().map(|problem| LINE * (1 + line_chars(problem).saturating_sub(1) / per_line) as f32).sum();
+    let messages: f32 = card
+        .problems
+        .iter()
+        .map(|problem| LINE * (1 + line_chars(problem).saturating_sub(1) / per_line) as f32)
+        .sum();
     let gaps = GAP * (card.problems.len().saturating_sub(1)) as f32;
     let actions = match card.fixes.len() {
         0 => 0.0,
@@ -80,50 +106,59 @@ pub fn estimated_height(card: &Card, expanded: bool) -> f32 {
 /// One problem: the mark of its weight, and what the server said with the name of the kind of problem after it.
 fn problem_row(problem: &Problem, theme: CodeTheme) -> AnyWidget {
     // The first line is the message; the lines after it are what the server adds, which a card has not the room for.
-    let message = problem.message.lines().next().unwrap_or("").trim().to_owned();
+    info!("Problem: {problem:?}");
+    let message = problem
+        .message
+        .lines()
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_owned();
     let mut spans = vec![TextSpan::new(message.as_str())];
     if let Some(code) = &problem.code {
         spans.push(TextSpan::new(" ["));
         spans.push(TextSpan::new(code.as_str()).style(SpanStyle::new().color(theme.link_hover)));
         spans.push(TextSpan::new("]"));
     }
-    let text = RichText::new(TextSpan::new("").children(spans)).text_style(fonts::ui().font_size(TEXT_SIZE).color(theme.text).text_overflow(TextOverflow::Wrap));
-    Row::new()
-        .vertical_alignment(BoxAlignment::Start)
-        .gaps(LayoutSpacing::all(MARK_GAP))
-        .children([
-            Container::new()
-                .margin(LayoutSpacing::new().top(5))
-                .width(MARK)
-                .height(MARK)
-                .decoration([BorderRadius::all(MARK / 2).notype(), color_of(problem.weight, theme).notype()])
-                .child(ZeroSizedBox)
-                .boxed(),
-            Expanded::new().child(text).boxed(),
-        ])
+    RichText::new(TextSpan::new("").children(spans))
+        .text_style(
+            fonts::ui()
+                .font_size(TEXT_SIZE)
+                .color(theme.text)
+                .text_overflow(TextOverflow::Wrap),
+        )
         .boxed()
 }
 
 /// A button of the strip that is a word or two and, after it, the keys that do it.
-fn action(label: String, keys: Option<&'static str>, theme: CodeTheme, press: impl Fn() + 'static) -> AnyWidget {
+fn action(
+    label: String,
+    keys: Option<&'static str>,
+    theme: CodeTheme,
+    press: impl Fn() + 'static,
+) -> AnyWidget {
     Button::new()
         .no_decor()
         .on_press(press)
         .build(move |state| {
-            let mut spans = vec![TextSpan::new(label.as_str()).style(SpanStyle::new().color(theme.marker))];
-            if let Some(keys) = keys {
-                spans.push(TextSpan::new("  "));
-                spans.push(TextSpan::new(keys).style(SpanStyle::new().color(theme.line_number)));
-            }
+            let (text_color, decor) = if state.is_hovered {
+                (
+                    theme.text,
+                    TextDecoration::new().line(TextDecorationLine::UNDERLINE),
+                )
+            } else {
+                (theme.marker, TextDecoration::None)
+            };
             Container::new()
-                .padding(pad(3, 6, 3, 6))
-                .decoration([
-                    BorderRadius::all(4).notype(),
-                    if state.is_hovered { theme.hover } else { Color::Transparent }.notype(),
-                ])
+                .padding(pad(3, 0, 3, GAP as u32))
                 .child(
-                    RichText::new(TextSpan::new("").children(spans))
-                        .text_style(fonts::ui().font_size(TEXT_SIZE - 1).color(theme.text).text_overflow(TextOverflow::Clip)),
+                    Text::new(label.to_string()).text_style(
+                        fonts::ui()
+                            .font_size(TEXT_SIZE - 1)
+                            .color(text_color)
+                            .text_decoration(decor)
+                            .text_overflow(TextOverflow::Clip),
+                    ),
                 )
         })
         .boxed()
@@ -140,14 +175,30 @@ fn strip(card: &Card, cell: &Rc<HoverCell>, theme: CodeTheme) -> AnyWidget {
             fix.run();
         }
     };
+    let spacing = |width| SizedBox::new().width(width);
     let first = &card.fixes[0];
-    let mut buttons: Vec<AnyWidget> = vec![action(first.title.clone(), Some(KEY_FIX), theme, run(first, cell))];
+    let mut buttons: Vec<AnyWidget> = list![action(
+        first.title.to_string(),
+        Some(KEY_FIX),
+        theme,
+        run(first, cell),
+    )];
     if card.fixes.len() > 1 {
         let toggle = Rc::clone(cell);
-        let label = if expanded { "Fewer actions\u{2026}" } else { "More actions\u{2026}" };
-        buttons.push(action(label.to_owned(), Some(KEY_MORE), theme, move || toggle.toggle_expanded()));
+        let label = if expanded {
+            "Fewer actions\u{2026}" // \u{2026}  elipsis
+        } else {
+            "More actions\u{2026}"
+        };
+        buttons.push(Expanded::new().box_child(ZeroSizedBox));
+        buttons.push(action(label.to_owned(), Some(KEY_MORE), theme, move || {
+            toggle.toggle_expanded()
+        }));
+        buttons.push(spacing(GAP * 2.0).boxed())
     }
-    let row = Row::new().vertical_alignment(BoxAlignment::Center).gaps(LayoutSpacing::all(14)).children(buttons);
+    let row = Row::new()
+        .vertical_alignment(BoxAlignment::Center)
+        .children(buttons);
     let mut column: Vec<AnyWidget> = vec![row.boxed()];
     if expanded {
         for fix in card.fixes.iter().skip(1) {
@@ -158,25 +209,45 @@ fn strip(card: &Card, cell: &Rc<HoverCell>, theme: CodeTheme) -> AnyWidget {
         .width(Dimension::Percent(100.0))
         .padding(pad(3, PADDING - 6, 3, PADDING - 6))
         .decoration([
-            BorderRadius::new().bottom_left(7).bottom_right(7).notype(),
+            BorderRadius::new()
+                .bottom_left(7)
+                .bottom_right(7)
+                .notype(),
             // The color of the side panel: the pink-black of the theme, a step from the card as the strip of a card is.
             theme.sidebar.notype(),
         ])
-        .child(Column::new().gaps(LayoutSpacing::all(2)).children(column))
+        .child(
+            Column::new()
+                .gaps(LayoutSpacing::all(2))
+                .children(column),
+        )
         .boxed()
 }
 
 /// The section for `card`, which has problems: each one, and under them the buttons for what can be done, if the server has said.
 pub fn problem_section(card: &Card, cell: &Rc<HoverCell>, theme: CodeTheme) -> AnyWidget {
-    let rows: Vec<AnyWidget> = card.problems.iter().map(|problem| problem_row(problem, theme)).collect();
-    let mut parts: Vec<AnyWidget> = vec![Container::new()
-        .padding(LayoutSpacing::all(PADDING))
-        .child(Column::new().gaps(LayoutSpacing::all(GAP as u32)).children(rows))
-        .boxed()];
+    let rows: Vec<AnyWidget> = card
+        .problems
+        .iter()
+        .map(|problem| problem_row(problem, theme))
+        .collect();
+    let mut parts: Vec<AnyWidget> = vec![
+        Container::new()
+            .padding(LayoutSpacing::all(PADDING))
+            .child(
+                Column::new()
+                    .gaps(LayoutSpacing::all(GAP as u32))
+                    .children(rows),
+            )
+            .boxed(),
+    ];
     if !card.fixes.is_empty() {
         parts.push(strip(card, cell, theme));
     }
-    SizedBox::new().width(Dimension::Percent(100.0)).box_child(Column::new().children(parts)).boxed()
+    SizedBox::new()
+        .width(Dimension::Percent(100.0))
+        .box_child(Column::new().children(parts))
+        .boxed()
 }
 
 #[cfg(test)]
@@ -186,12 +257,28 @@ mod tests {
     use aimer::input::input::HoverSpot;
 
     fn card(problems: Vec<Problem>, fixes: Vec<Fix>) -> Card {
-        let spot = HoverSpot { range: 0..1, x: 0.0, y: 0.0, width: 1.0, height: 1.0, extent: None };
-        Card { spot, markdown: String::new(), problems, fixes }
+        let spot = HoverSpot {
+            range: 0..1,
+            x: 0.0,
+            y: 0.0,
+            width: 1.0,
+            height: 1.0,
+            extent: None,
+        };
+        Card {
+            spot,
+            markdown: String::new(),
+            problems,
+            fixes,
+        }
     }
 
     fn problem(message: &str, code: Option<&str>) -> Problem {
-        Problem { weight: Weight::Error, message: message.to_owned(), code: code.map(str::to_owned) }
+        Problem {
+            weight: Weight::Error,
+            message: message.to_owned(),
+            code: code.map(str::to_owned),
+        }
     }
 
     fn fix() -> Fix {
@@ -199,18 +286,44 @@ mod tests {
     }
 
     #[test]
-    fn the_card_is_as_wide_as_what_it_says_and_no_wider_than_the_most_it_may_be_nor_narrower_than_the_least() {
-        let width = |message: &str, code: Option<&str>| card_width(&card(vec![problem(message, code)], Vec::new()));
-        assert_eq!(width("x", None), MIN_WIDTH, "a short message does not make a card of a few characters");
-        assert_eq!(width(&"x".repeat(500), None), MAX_WIDTH, "and a long one wraps in the most");
+    fn the_card_is_as_wide_as_what_it_says_and_no_wider_than_the_most_it_may_be_nor_narrower_than_the_least()
+     {
+        let width = |message: &str, code: Option<&str>| {
+            card_width(&card(vec![problem(message, code)], Vec::new()))
+        };
+        assert_eq!(
+            width("x", None),
+            MIN_WIDTH,
+            "a short message does not make a card of a few characters"
+        );
+        assert_eq!(
+            width(&"x".repeat(500), None),
+            MAX_WIDTH,
+            "and a long one wraps in the most"
+        );
         let mid = width(&"x".repeat(30), Some("E0412"));
         assert!(mid > MIN_WIDTH && mid < MAX_WIDTH, "{mid}");
-        assert!(width(&"x".repeat(30), Some("E0412")) > width(&"x".repeat(30), None), "the code is part of the line");
+        assert!(
+            width(&"x".repeat(30), Some("E0412")) > width(&"x".repeat(30), None),
+            "the code is part of the line"
+        );
         // The widest of the problems is what it is as wide as, and only the first line of a message counts.
-        let two = card_width(&card(vec![problem("short", None), problem(&"y".repeat(40), None)], Vec::new()));
+        let two = card_width(&card(
+            vec![problem("short", None), problem(&"y".repeat(40), None)],
+            Vec::new(),
+        ));
         assert_eq!(two, width(&"y".repeat(40), None));
-        assert_eq!(width("short\nan awfully long second line that is not in the card at all, not even a little", None), MIN_WIDTH);
-        assert!(MAX_WIDTH <= 440.0, "smaller than the card of documentation, which has a page to read");
+        assert_eq!(
+            width(
+                "short\nan awfully long second line that is not in the card at all, not even a little",
+                None
+            ),
+            MIN_WIDTH
+        );
+        assert!(
+            MAX_WIDTH <= 440.0,
+            "smaller than the card of documentation, which has a page to read"
+        );
     }
 
     #[test]
@@ -229,10 +342,19 @@ mod tests {
     #[test]
     fn the_section_is_as_tall_as_its_messages_and_the_strip_when_there_are_fixes() {
         let base = 2.0 * PADDING as f32;
-        assert_eq!(estimated_height(&card(vec![problem("short", None)], Vec::new()), false), base + LINE);
-        assert_eq!(estimated_height(&card(vec![problem("short", None)], vec![fix()]), false), base + LINE + STRIP);
         assert_eq!(
-            estimated_height(&card(vec![problem("one", None), problem("two", None)], Vec::new()), false),
+            estimated_height(&card(vec![problem("short", None)], Vec::new()), false),
+            base + LINE
+        );
+        assert_eq!(
+            estimated_height(&card(vec![problem("short", None)], vec![fix()]), false),
+            base + LINE + STRIP
+        );
+        assert_eq!(
+            estimated_height(
+                &card(vec![problem("one", None), problem("two", None)], Vec::new()),
+                false
+            ),
             base + 2.0 * LINE + GAP,
             "a gap between two"
         );
@@ -243,9 +365,24 @@ mod tests {
         let base = 2.0 * PADDING as f32;
         // A message that fills a line of the widest card, and the code after it that does not fit in the line.
         let full = "y".repeat(chars_per_line(MAX_WIDTH));
-        assert_eq!(estimated_height(&card(vec![problem(&full, None)], Vec::new()), false), base + LINE);
-        assert_eq!(estimated_height(&card(vec![problem(&full, Some("E0412"))], Vec::new()), false), base + 2.0 * LINE);
-        assert_eq!(estimated_height(&card(vec![problem("first\nsecond\nthird", None)], Vec::new()), false), base + LINE);
+        assert_eq!(
+            estimated_height(&card(vec![problem(&full, None)], Vec::new()), false),
+            base + LINE
+        );
+        assert_eq!(
+            estimated_height(
+                &card(vec![problem(&full, Some("E0412"))], Vec::new()),
+                false
+            ),
+            base + 2.0 * LINE
+        );
+        assert_eq!(
+            estimated_height(
+                &card(vec![problem("first\nsecond\nthird", None)], Vec::new()),
+                false
+            ),
+            base + LINE
+        );
     }
 
     #[test]
@@ -255,7 +392,11 @@ mod tests {
         assert_eq!(estimated_height(&three, false), base + STRIP);
         assert_eq!(estimated_height(&three, true), base + STRIP + 2.0 * FIX_ROW);
         let one = card(vec![problem("m", None)], vec![fix()]);
-        assert_eq!(estimated_height(&one, true), base + STRIP, "there is no other to list");
+        assert_eq!(
+            estimated_height(&one, true),
+            base + STRIP,
+            "there is no other to list"
+        );
     }
 
     #[test]

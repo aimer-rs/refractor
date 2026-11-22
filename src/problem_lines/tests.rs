@@ -18,11 +18,19 @@ const COLORS: LineColors = LineColors {
 };
 
 fn found(range: Range<usize>, severity: Severity) -> Diagnostic {
-    Diagnostic { range, severity, message: String::new(), code: None }
+    Diagnostic {
+        range,
+        severity,
+        message: String::new(),
+        code: None,
+    }
 }
 
 fn marks(diagnostics: &[Diagnostic]) -> Vec<(Range<usize>, Weight)> {
-    marks_of(diagnostics, &TextSnapshot::from_text(TEXT)).into_iter().map(|mark| (mark.range, mark.weight)).collect()
+    marks_of(diagnostics, &TextSnapshot::from_text(TEXT))
+        .into_iter()
+        .map(|mark| (mark.range, mark.weight))
+        .collect()
 }
 
 #[test]
@@ -34,15 +42,28 @@ fn what_is_less_wrong_is_drawn_first_so_that_the_worse_is_over_it() {
         found(16..17, Severity::Information),
     ]);
     assert_eq!(
-        order.iter().map(|(_, weight)| *weight).collect::<Vec<_>>(),
+        order
+            .iter()
+            .map(|(_, weight)| *weight)
+            .collect::<Vec<_>>(),
         [Weight::Weak, Weight::Weak, Weight::Warning, Weight::Error]
     );
 }
 
 #[test]
 fn what_weighs_the_same_is_in_the_order_of_the_text() {
-    let order = marks(&[found(20..21, Severity::Warning), found(4..5, Severity::Warning), found(16..19, Severity::Warning)]);
-    assert_eq!(order.iter().map(|(range, _)| range.start).collect::<Vec<_>>(), [4, 16, 20]);
+    let order = marks(&[
+        found(20..21, Severity::Warning),
+        found(4..5, Severity::Warning),
+        found(16..19, Severity::Warning),
+    ]);
+    assert_eq!(
+        order
+            .iter()
+            .map(|(range, _)| range.start)
+            .collect::<Vec<_>>(),
+        [4, 16, 20]
+    );
 }
 
 #[test]
@@ -53,7 +74,11 @@ fn a_problem_that_is_at_a_point_has_the_character_there_to_be_under() {
     assert_eq!(marks(&[found(26..26, Severity::Error)])[0].0, 25..26);
     // A character of more than one byte is under whole: `é` of the third line is two bytes from 35.
     assert_eq!(marks(&[found(35..35, Severity::Error)])[0].0, 35..37);
-    assert_eq!(marks(&[found(37..37, Severity::Error)])[0].0, 37..38, "after it there is a space, which is the character at the point");
+    assert_eq!(
+        marks(&[found(37..37, Severity::Error)])[0].0,
+        37..38,
+        "after it there is a space, which is the character at the point"
+    );
     // And the one before the point is taken whole where it is at the end of a line.
     let accent = TextSnapshot::from_text("let é\nx");
     let under_accent = marks_of(&[found(6..6, Severity::Error)], &accent);
@@ -64,26 +89,56 @@ fn a_problem_that_is_at_a_point_has_the_character_there_to_be_under() {
 
 #[test]
 fn what_is_past_the_end_is_cut_and_what_is_empty_with_no_character_to_be_under_is_left_out() {
-    assert_eq!(marks(&[found(40..900, Severity::Error)])[0].0, 40..TEXT.len().min(900));
+    assert_eq!(
+        marks(&[found(40..900, Severity::Error)])[0].0,
+        40..TEXT.len().min(900)
+    );
     let empty = TextSnapshot::from_text("");
-    assert!(marks_of(&[found(0..0, Severity::Error)], &empty).is_empty(), "no text, nothing to be under");
+    assert!(
+        marks_of(&[found(0..0, Severity::Error)], &empty).is_empty(),
+        "no text, nothing to be under"
+    );
     assert!(marks_of(&[found(5..9, Severity::Error)], &empty).is_empty());
     let line_break = TextSnapshot::from_text("\n");
-    assert!(marks_of(&[found(0..0, Severity::Error)], &line_break).is_empty(), "a line break is not a character to be under");
+    assert!(
+        marks_of(&[found(0..0, Severity::Error)], &line_break).is_empty(),
+        "a line break is not a character to be under"
+    );
 }
 
 #[test]
 fn a_file_has_at_most_so_many_lines_and_they_are_the_worst() {
     let many: Vec<Diagnostic> = (0..ProblemLines::MOST + 20)
-        .map(|index| found(0..1, if index < 5 { Severity::Error } else { Severity::Hint }))
+        .map(|index| {
+            found(
+                0..1,
+                if index < 5 {
+                    Severity::Error
+                } else {
+                    Severity::Hint
+                },
+            )
+        })
         .collect();
     let drawn = marks(&many);
     assert_eq!(drawn.len(), ProblemLines::MOST);
-    assert_eq!(drawn.iter().filter(|(_, weight)| *weight == Weight::Error).count(), 5, "none of the errors was cut");
+    assert_eq!(
+        drawn
+            .iter()
+            .filter(|(_, weight)| *weight == Weight::Error)
+            .count(),
+        5,
+        "none of the errors was cut"
+    );
 }
 
 /// A server that is ready, with the file open, and a cell that is attached to the file.
-fn ready() -> (Rc<aimer::Venus>, Fake, Rc<ProblemLines>, TextEditingController) {
+fn ready() -> (
+    Rc<aimer::Venus>,
+    Fake,
+    Rc<ProblemLines>,
+    TextEditingController,
+) {
     let venus = installed();
     let fake = Fake::new();
     let lsp = lsp_with(&fake);
@@ -91,7 +146,10 @@ fn ready() -> (Rc<aimer::Venus>, Fake, Rc<ProblemLines>, TextEditingController) 
     lsp.open(Path::new(FILE), &controller, Rc::new(|| {}));
     settle(&venus);
     let _ = fake.requests();
-    fake.answer(1, json!({"capabilities": {"textDocumentSync": 2, "positionEncoding": "utf-8"}}));
+    fake.answer(
+        1,
+        json!({"capabilities": {"textDocumentSync": 2, "positionEncoding": "utf-8"}}),
+    );
     settle(&venus);
     let _ = fake.requests();
     let lines = Rc::new(ProblemLines::default());
@@ -116,17 +174,36 @@ fn nothing_is_drawn_until_the_server_has_said_something() {
 #[test]
 fn the_problems_are_drawn_in_the_colors_of_their_weight() {
     let (venus, fake, lines, _controller) = ready();
-    publish(&fake, 1, json!([reported(1, 4, 7, 2), reported(1, 8, 9, 1), reported(2, 4, 7, 3)]));
+    publish(
+        &fake,
+        1,
+        json!([
+            reported(1, 4, 7, 2),
+            reported(1, 8, 9, 1),
+            reported(2, 4, 7, 3)
+        ]),
+    );
     settle(&venus);
     lines.refresh();
     let set = lines.underlines().expect("the server said");
-    let drawn: Vec<_> = set.items().iter().map(|line| (line.range(), line.color())).collect();
+    let drawn: Vec<_> = set
+        .items()
+        .iter()
+        .map(|line| (line.range(), line.color()))
+        .collect();
     assert_eq!(
         drawn,
-        vec![(31..34, COLORS.weak), (16..19, COLORS.warning), (20..21, COLORS.error)],
+        vec![
+            (31..34, COLORS.weak),
+            (16..19, COLORS.warning),
+            (20..21, COLORS.error)
+        ],
         "the weakest first, and the error last, which is over the others"
     );
-    assert!(set.text().is_some(), "made for the text the server has, which the area moves over what is typed since");
+    assert!(
+        set.text().is_some(),
+        "made for the text the server has, which the area moves over what is typed since"
+    );
 }
 
 #[test]
@@ -145,8 +222,15 @@ fn the_pane_is_drawn_again_only_for_problems_that_differ_from_the_ones_it_has() 
     let first = lines.underlines().unwrap();
     lines.refresh();
     assert_eq!(drawn.get(), 1, "the same");
-    assert!(lines.underlines().unwrap().same_as(&first), "and the same lines, which the area does not draw again");
-    publish(&fake, 1, json!([reported(1, 8, 9, 1), reported(1, 4, 7, 2)]));
+    assert!(
+        lines.underlines().unwrap().same_as(&first),
+        "and the same lines, which the area does not draw again"
+    );
+    publish(
+        &fake,
+        1,
+        json!([reported(1, 8, 9, 1), reported(1, 4, 7, 2)]),
+    );
     settle(&venus);
     lines.refresh();
     assert_eq!(drawn.get(), 2);
@@ -154,11 +238,16 @@ fn the_pane_is_drawn_again_only_for_problems_that_differ_from_the_ones_it_has() 
     settle(&venus);
     lines.refresh();
     assert_eq!(drawn.get(), 3, "none, where there were some");
-    assert_eq!(lines.underlines().map(|set| set.is_empty()), Some(true), "and nothing is drawn");
+    assert_eq!(
+        lines.underlines().map(|set| set.is_empty()),
+        Some(true),
+        "and nothing is drawn"
+    );
 }
 
 #[test]
-fn the_lines_that_were_drawn_stay_while_the_server_is_told_of_an_edit_and_has_not_said_what_is_wrong_with_it() {
+fn the_lines_that_were_drawn_stay_while_the_server_is_told_of_an_edit_and_has_not_said_what_is_wrong_with_it()
+ {
     let (venus, fake, lines, controller) = ready();
     publish(&fake, 1, json!([reported(1, 8, 9, 1)]));
     settle(&venus);
@@ -168,7 +257,11 @@ fn the_lines_that_were_drawn_stay_while_the_server_is_told_of_an_edit_and_has_no
     controller.set_text(&format!("// c\n{TEXT}"));
     settle(&venus);
     lines.refresh();
-    assert_eq!(lines.underlines().map(|set| set.len()), Some(1), "kept, to be moved over the edit by the area");
+    assert_eq!(
+        lines.underlines().map(|set| set.len()),
+        Some(1),
+        "kept, to be moved over the edit by the area"
+    );
     // The server says what is wrong with the new text.
     publish(&fake, 2, json!([reported(2, 8, 9, 1)]));
     settle(&venus);
@@ -183,8 +276,18 @@ fn a_new_color_makes_the_lines_again() {
     settle(&venus);
     lines.refresh();
     let before = lines.underlines().unwrap();
-    let lsp = lines.context.borrow().as_ref().unwrap().lsp.clone();
-    let other = LineColors { error: Color::Rgb(1, 2, 3), ..COLORS };
+    let lsp = lines
+        .context
+        .borrow()
+        .as_ref()
+        .unwrap()
+        .lsp
+        .clone()
+        .expect("attached to a server");
+    let other = LineColors {
+        error: Color::Rgb(1, 2, 3),
+        ..COLORS
+    };
     lines.attach(lsp, PathBuf::from(FILE), controller, other);
     let after = lines.underlines().unwrap();
     assert!(!after.same_as(&before));
@@ -196,7 +299,8 @@ fn reported_with(line: u32, from: u32, to: u32, severity: u32, message: &str, co
 }
 
 #[test]
-fn the_problems_at_a_byte_are_those_whose_range_has_it_worst_first_with_what_the_server_said_of_them() {
+fn the_problems_at_a_byte_are_those_whose_range_has_it_worst_first_with_what_the_server_said_of_them()
+ {
     let (venus, fake, lines, _controller) = ready();
     publish(
         &fake,
@@ -212,13 +316,36 @@ fn the_problems_at_a_byte_are_those_whose_range_has_it_worst_first_with_what_the
     lines.refresh();
     // The `l` of `let` of the second line: byte 16.
     let found = lines.at(16);
-    assert_eq!(found.iter().map(|found| found.message.as_str()).collect::<Vec<_>>(), ["an error", "a warning"], "the error first");
+    assert_eq!(
+        found
+            .iter()
+            .map(|found| found.message.as_str())
+            .collect::<Vec<_>>(),
+        ["an error", "a warning"],
+        "the error first"
+    );
     assert_eq!(found[0].weight, Weight::Error);
     assert_eq!(found[0].code.as_deref(), Some("E0412"));
     assert_eq!(found[0].range, 16..23);
-    assert!(lines.at(19).iter().all(|found| found.message != "a warning"), "the warning is over `let`, and this is the space after it");
-    assert_eq!(lines.at(20).iter().map(|found| found.message.as_str()).collect::<Vec<_>>(), ["an error", "a hint"]);
-    assert!(lines.at(23).is_empty(), "past the end of the last range, which is not in it");
+    assert!(
+        lines
+            .at(19)
+            .iter()
+            .all(|found| found.message != "a warning"),
+        "the warning is over `let`, and this is the space after it"
+    );
+    assert_eq!(
+        lines
+            .at(20)
+            .iter()
+            .map(|found| found.message.as_str())
+            .collect::<Vec<_>>(),
+        ["an error", "a hint"]
+    );
+    assert!(
+        lines.at(23).is_empty(),
+        "past the end of the last range, which is not in it"
+    );
     assert!(lines.at(2).is_empty(), "nothing is there");
 }
 
@@ -232,7 +359,8 @@ fn with_let_problem() -> (Rc<ProblemLines>, TextEditingController) {
 }
 
 #[test]
-fn the_problems_at_a_byte_are_looked_for_in_the_text_as_it_is_now_where_text_was_put_in_before_them() {
+fn the_problems_at_a_byte_are_looked_for_in_the_text_as_it_is_now_where_text_was_put_in_before_them()
+ {
     let (lines, controller) = with_let_problem();
     assert_eq!(lines.at(17).len(), 1);
     controller.replace_range(0..0, "// c\n");
@@ -259,7 +387,10 @@ fn a_cell_with_nothing_said_has_no_problems_at_a_byte() {
     let lines = Rc::new(ProblemLines::default());
     assert!(lines.at(0).is_empty());
     let (_venus, _fake, ready, _controller) = ready();
-    assert!(ready.at(0).is_empty(), "attached, and the server has said nothing");
+    assert!(
+        ready.at(0).is_empty(),
+        "attached, and the server has said nothing"
+    );
 }
 
 #[test]
@@ -267,4 +398,40 @@ fn a_cell_that_has_no_pane_has_nothing() {
     let lines = Rc::new(ProblemLines::default());
     lines.refresh();
     assert!(lines.underlines().is_none());
+}
+
+#[test]
+fn a_manifest_is_checked_by_the_schema_and_its_lines_follow_the_edits() {
+    let controller = TextEditingController::with_str("[package]\nnme = 1\nname = \"a\"\n");
+    let lines = Rc::new(ProblemLines::default());
+    lines.attach_manifest(PathBuf::from("/p/Cargo.toml"), controller.clone(), COLORS);
+    let found = lines.at(11);
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].weight, Weight::Warning);
+    assert!(
+        found[0]
+            .message
+            .starts_with("Unknown key `nme`"),
+        "{}",
+        found[0].message
+    );
+    assert_eq!(found[0].range, 10..13);
+    assert!(lines.underlines().is_some());
+    // Typed in front of it, the line stays under the word until the text is checked again, and then it is the new text that is.
+    controller.replace_range(0..0, "# a\n");
+    assert_eq!(lines.at(15)[0].range, 14..17);
+    lines.refresh();
+    assert_eq!(lines.at(15)[0].range, 14..17);
+    controller.replace_range(14..17, "name");
+    lines.refresh();
+    assert_eq!(lines.at(15), vec![], "the key is right now");
+    // A wrong value is an error.
+    controller.replace_range(0..0, "[profile.release]\nopt-level = \"fast\"\n");
+    lines.refresh();
+    assert!(
+        lines
+            .at(32)
+            .iter()
+            .any(|found| found.weight == Weight::Error)
+    );
 }

@@ -44,7 +44,11 @@ impl StatelessWidget for EditorArea {
                 let space = space.read();
                 (space.auto_save(), space.documents.clone())
             };
-            let shown_tab = if settings { Some(Workspace::SETTINGS_TAB) } else { shown.as_ref().map(|(document, _)| document.id) };
+            let shown_tab = if settings {
+                Some(Workspace::SETTINGS_TAB)
+            } else {
+                shown.as_ref().map(|(document, _)| document.id)
+            };
             auto_save.switched(shown_tab, documents);
         }
         let mut column = vec![TabBar.boxed()];

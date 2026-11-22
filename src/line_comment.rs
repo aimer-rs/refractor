@@ -16,6 +16,8 @@ pub struct LineComment;
 impl LineComment {
     /// The marker of a line comment in Rust.
     pub const RUST: &'static str = "//";
+    /// What begins a comment in TOML.
+    pub const TOML: &'static str = "#";
     /// The key: the command key on macOS and the control key elsewhere, with a slash.
     pub const SHORTCUT: &'static str = "CmdOrCtrl+/";
     /// The most bytes of a line's indent that are read to find what it shares with the others.
@@ -28,19 +30,28 @@ impl LineComment {
     ///
     /// A doc comment is not a comment to take away: `///` and `//!` are text, and are commented like any, so that taking that comment
     /// away leaves them as they were.
-    pub fn toggle(text: &TextSnapshot, anchor: usize, focus: usize, marker: &str) -> Option<Shifted> {
+    pub fn toggle(
+        text: &TextSnapshot,
+        anchor: usize,
+        focus: usize,
+        marker: &str,
+    ) -> Option<Shifted> {
         let (start, end) = (anchor.min(focus), anchor.max(focus));
         // Each line that has text: where its text starts, and how many bytes of marker and space it begins with, if it is commented.
-        let lines: Vec<(Range<usize>, usize, Option<usize>)> = AutoIndent::touched_lines(text, start, end)
-            .into_iter()
-            .filter_map(|line| {
-                let indent = Self::indent_of(text, &line)?;
-                let commented = Self::marker_at(text, line.start + indent, line.end, marker);
-                Some((line, indent, commented))
-            })
-            .collect();
+        let lines: Vec<(Range<usize>, usize, Option<usize>)> =
+            AutoIndent::touched_lines(text, start, end)
+                .into_iter()
+                .filter_map(|line| {
+                    let indent = Self::indent_of(text, &line)?;
+                    let commented = Self::marker_at(text, line.start + indent, line.end, marker);
+                    Some((line, indent, commented))
+                })
+                .collect();
         let first = lines.first()?;
-        let edits: Vec<(Range<usize>, String)> = if lines.iter().all(|(_, _, commented)| commented.is_some()) {
+        let edits: Vec<(Range<usize>, String)> = if lines
+            .iter()
+            .all(|(_, _, commented)| commented.is_some())
+        {
             lines
                 .iter()
                 .filter_map(|(line, indent, commented)| {
@@ -53,7 +64,9 @@ impl LineComment {
             let shared = lines
                 .iter()
                 .skip(1)
-                .fold(first.1, |shared, (line, ..)| Self::common_indent(text, first.0.start, line.start, shared));
+                .fold(first.1, |shared, (line, ..)| {
+                    Self::common_indent(text, first.0.start, line.start, shared)
+                });
             let put = format!("{marker} ");
             lines
                 .iter()
@@ -93,11 +106,20 @@ impl LineComment {
     /// not one.
     fn marker_at(text: &TextSnapshot, at: usize, end: usize, marker: &str) -> Option<usize> {
         let fits = at + marker.len() <= end;
-        if !fits || !marker.bytes().enumerate().all(|(offset, byte)| text.byte_at(at + offset) == Some(byte)) {
+        if !fits
+            || !marker
+                .bytes()
+                .enumerate()
+                .all(|(offset, byte)| text.byte_at(at + offset) == Some(byte))
+        {
             return None;
         }
         let after = at + marker.len();
-        let next = if after < end { text.byte_at(after) } else { None };
+        let next = if after < end {
+            text.byte_at(after)
+        } else {
+            None
+        };
         if marker == Self::RUST && matches!(next, Some(b'/' | b'!')) {
             return None;
         }
@@ -108,8 +130,13 @@ impl LineComment {
     /// changed: `false` where no line has text.
     pub fn apply(controller: &TextEditingController, marker: &str) -> bool {
         let selection = controller.value().selection();
-        Self::toggle(&controller.snapshot(), selection.anchor(), selection.focus(), marker)
-            .is_some_and(|toggled| toggled.apply(controller))
+        Self::toggle(
+            &controller.snapshot(),
+            selection.anchor(),
+            selection.focus(),
+            marker,
+        )
+        .is_some_and(|toggled| toggled.apply(controller))
     }
 }
 

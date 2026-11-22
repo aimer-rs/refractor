@@ -18,8 +18,8 @@ use serde_json::{Value, json};
 use super::items::{self, Answer, Hover};
 use super::position::{self, Encoding};
 use super::protocol::{
-    self, Capabilities, Change, Health, Legend, Place, Progress, ProgressUpdate, Published, Severity,
-    SyncKind,
+    self, Capabilities, Change, Health, Legend, Place, Progress, ProgressUpdate, Published,
+    Severity, SyncKind,
 };
 use super::transport::{self, Incoming};
 
@@ -258,8 +258,16 @@ impl Session {
     /// Tells the session that the file `path` was saved, which a server such as rust-analyzer answers by checking the project. Nothing
     /// is said of a file that the server was not told of, or to a server that is not ready.
     pub fn saved(&mut self, path: &Path) {
-        if self.status == Status::Ready && self.documents.get(path).is_some_and(|document| document.version > 0) {
-            self.outgoing.push(transport::notification(protocol::DID_SAVE, protocol::did_save_params(path)));
+        if self.status == Status::Ready
+            && self
+                .documents
+                .get(path)
+                .is_some_and(|document| document.version > 0)
+        {
+            self.outgoing.push(transport::notification(
+                protocol::DID_SAVE,
+                protocol::did_save_params(path),
+            ));
         }
     }
 
@@ -491,7 +499,8 @@ impl Session {
         }
         let id = self.take_id();
         self.asked.insert(id);
-        self.outgoing.push(transport::request(id, method, params));
+        self.outgoing
+            .push(transport::request(id, method, params));
         Some(id)
     }
 
@@ -629,7 +638,10 @@ impl Session {
         let Some(published) = self.published.get(path) else {
             return Some((Vec::new(), text));
         };
-        if published.version.is_some_and(|version| version != document.version) {
+        if published
+            .version
+            .is_some_and(|version| version != document.version)
+        {
             return None;
         }
         Some((self.diagnostics(path, &text), text))
@@ -754,7 +766,11 @@ impl Session {
 
     /// What the server answered to `initialize`: the session is ready and the server is told of the files.
     fn initialized(&mut self, result: Result<Value, transport::ResponseError>) {
-        self.legend = result.as_ref().ok().and_then(protocol::semantic_legend).map(Rc::new);
+        self.legend = result
+            .as_ref()
+            .ok()
+            .and_then(protocol::semantic_legend)
+            .map(Rc::new);
         let capabilities = match result {
             Ok(result) => protocol::initialize_result(&result)
                 .map_err(|why| format!("the server's answer to initialize was not one: {why}")),
@@ -1092,23 +1108,47 @@ mod tests {
     }
 
     #[test]
-    fn a_request_by_method_is_sent_as_it_is_and_answered_with_what_the_server_said_and_none_for_an_error() {
+    fn a_request_by_method_is_sent_as_it_is_and_answered_with_what_the_server_said_and_none_for_an_error()
+     {
         let mut session = ready(incremental_utf8());
         let (first, second) = (
-            session.ask("textDocument/codeLens", json!({"textDocument": {"uri": "file:///a.rs"}})).expect("a ready server is asked"),
-            session.ask("codeLens/resolve", json!({"data": 1})).expect("and again, with the first not answered"),
+            session
+                .ask(
+                    "textDocument/codeLens",
+                    json!({"textDocument": {"uri": "file:///a.rs"}}),
+                )
+                .expect("a ready server is asked"),
+            session
+                .ask("codeLens/resolve", json!({"data": 1}))
+                .expect("and again, with the first not answered"),
         );
         let told = sent(&mut session);
-        assert_eq!(methods(&told), ["textDocument/codeLens", "codeLens/resolve"]);
+        assert_eq!(
+            methods(&told),
+            ["textDocument/codeLens", "codeLens/resolve"]
+        );
         assert_eq!((told[0].2, told[1].2), (Some(first), Some(second)));
-        assert_eq!(told[1].1, json!({"data": 1}), "the parameters are the caller's");
+        assert_eq!(
+            told[1].1,
+            json!({"data": 1}),
+            "the parameters are the caller's"
+        );
         // They are answered out of order, and by number.
-        session.receive(Incoming::Response { id: second, result: Ok(json!({"command": null})) });
+        session.receive(Incoming::Response {
+            id: second,
+            result: Ok(json!({"command": null})),
+        });
         session.receive(Incoming::Response {
             id: first,
-            result: Err(transport::ResponseError { code: -32801, message: "content modified".into() }),
+            result: Err(transport::ResponseError {
+                code: -32801,
+                message: "content modified".into(),
+            }),
         });
-        assert_eq!(session.take_replies(), vec![(second, Some(json!({"command": null}))), (first, None)]);
+        assert_eq!(
+            session.take_replies(),
+            vec![(second, Some(json!({"command": null}))), (first, None)]
+        );
         assert!(session.take_replies().is_empty(), "taken once");
     }
 
@@ -1121,11 +1161,16 @@ mod tests {
     #[test]
     fn a_request_by_method_that_is_cancelled_is_not_kept() {
         let mut session = ready(incremental_utf8());
-        let id = session.ask("codeLens/resolve", json!({})).unwrap();
+        let id = session
+            .ask("codeLens/resolve", json!({}))
+            .unwrap();
         let _ = sent(&mut session);
         session.cancel(id);
         assert_eq!(methods(&sent(&mut session)), [protocol::CANCEL_REQUEST]);
-        session.receive(Incoming::Response { id, result: Ok(json!(1)) });
+        session.receive(Incoming::Response {
+            id,
+            result: Ok(json!(1)),
+        });
         assert!(session.take_replies().is_empty());
     }
 
@@ -1752,29 +1797,60 @@ mod tests {
     }
 
     #[test]
-    fn the_diagnostics_that_are_current_are_given_with_the_text_the_server_has_and_are_not_given_while_the_server_is_behind() {
+    fn the_diagnostics_that_are_current_are_given_with_the_text_the_server_has_and_are_not_given_while_the_server_is_behind()
+     {
         let mut session = ready(incremental_utf8());
         let text = snapshot("let x = 1;\n");
-        assert!(session.current_diagnostics(path()).is_none(), "a file that is not open");
+        assert!(
+            session.current_diagnostics(path()).is_none(),
+            "a file that is not open"
+        );
         session.open(path(), &text);
         let _ = sent(&mut session);
-        let (none, _) = session.current_diagnostics(path()).expect("open and told: nothing is published, and that is nothing wrong");
+        let (none, _) = session
+            .current_diagnostics(path())
+            .expect("open and told: nothing is published, and that is nothing wrong");
         assert!(none.is_empty());
-        session.receive(publish(Some(1), json!([diagnostic((0, 4), (0, 5), 1, "old")])));
-        let (found, of) = session.current_diagnostics(path()).expect("current");
-        assert_eq!(found.iter().map(|found| found.range.clone()).collect::<Vec<_>>(), [4..5]);
+        session.receive(publish(
+            Some(1),
+            json!([diagnostic((0, 4), (0, 5), 1, "old")]),
+        ));
+        let (found, of) = session
+            .current_diagnostics(path())
+            .expect("current");
+        assert_eq!(
+            found
+                .iter()
+                .map(|found| found.range.clone())
+                .collect::<Vec<_>>(),
+            [4..5]
+        );
         assert_eq!(of.len(), text.len(), "and the text that its bytes are of");
         // The text changes and the server is told: what was published is not about this text, and is not given; the next is.
         let edited = text.with_replaced(0..0, "// c\n");
         session.changed(path(), &edited);
         let _ = sent(&mut session);
-        assert!(session.current_diagnostics(path()).is_none(), "a version behind");
-        session.receive(publish(Some(2), json!([diagnostic((1, 4), (1, 5), 1, "new")])));
-        let (found, of) = session.current_diagnostics(path()).expect("current again");
+        assert!(
+            session.current_diagnostics(path()).is_none(),
+            "a version behind"
+        );
+        session.receive(publish(
+            Some(2),
+            json!([diagnostic((1, 4), (1, 5), 1, "new")]),
+        ));
+        let (found, of) = session
+            .current_diagnostics(path())
+            .expect("current again");
         assert_eq!((found[0].range.clone(), of.len()), (9..10, edited.len()));
         // A publication that says no version is taken for the text as it is, and an empty one says that there is nothing wrong.
         session.receive(publish(None, json!([])));
-        assert!(session.current_diagnostics(path()).expect("current").0.is_empty());
+        assert!(
+            session
+                .current_diagnostics(path())
+                .expect("current")
+                .0
+                .is_empty()
+        );
     }
 
     #[test]
@@ -2163,16 +2239,26 @@ mod tests {
     }
 
     #[test]
-    fn a_saved_file_is_told_to_the_server_that_has_it_open_and_one_that_is_not_ready_or_not_open_is_not_told() {
+    fn a_saved_file_is_told_to_the_server_that_has_it_open_and_one_that_is_not_ready_or_not_open_is_not_told()
+     {
         let mut session = ready(incremental_utf8());
-        session.open(Path::new("/project/a.rs"), &TextSnapshot::from_text("fn a() {}\n"));
+        session.open(
+            Path::new("/project/a.rs"),
+            &TextSnapshot::from_text("fn a() {}\n"),
+        );
         let _ = sent(&mut session);
         session.saved(Path::new("/project/a.rs"));
         let told = sent(&mut session);
         assert_eq!(methods(&told), ["textDocument/didSave"]);
-        assert_eq!(told[0].1, json!({"textDocument": {"uri": "file:///project/a.rs"}}));
+        assert_eq!(
+            told[0].1,
+            json!({"textDocument": {"uri": "file:///project/a.rs"}})
+        );
         session.saved(Path::new("/project/not_open.rs"));
-        assert!(sent(&mut session).is_empty(), "a file the server was not told of");
+        assert!(
+            sent(&mut session).is_empty(),
+            "a file the server was not told of"
+        );
         let mut starting = Session::new(Path::new("/project"), 1);
         let _ = sent(&mut starting);
         starting.open(Path::new("/project/a.rs"), &TextSnapshot::from_text("x"));
@@ -2195,7 +2281,8 @@ mod tests {
     }
 
     #[test]
-    fn a_server_that_says_its_tokens_are_not_as_they_were_is_answered_and_it_is_counted_once_for_each() {
+    fn a_server_that_says_its_tokens_are_not_as_they_were_is_answered_and_it_is_counted_once_for_each()
+     {
         let mut session = ready(incremental_utf8());
         assert_eq!(session.take_semantic_refreshes(), 0);
         for id in [json!(1), json!("b")] {
@@ -2206,7 +2293,10 @@ mod tests {
             });
             let bodies = session.take_outgoing();
             assert_eq!(bodies.len(), 1, "it is answered");
-            assert_eq!(serde_json::from_slice::<Value>(&bodies[0]).unwrap(), json!({"jsonrpc": "2.0", "id": id, "result": null}));
+            assert_eq!(
+                serde_json::from_slice::<Value>(&bodies[0]).unwrap(),
+                json!({"jsonrpc": "2.0", "id": id, "result": null})
+            );
         }
         assert_eq!(session.take_semantic_refreshes(), 2);
         assert_eq!(session.take_semantic_refreshes(), 0, "and not again");

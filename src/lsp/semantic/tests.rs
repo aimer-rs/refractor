@@ -26,7 +26,11 @@ fn ready(capabilities: Value) -> (Rc<aimer::Venus>, Fake, Lsp) {
     let venus = installed();
     let fake = Fake::new();
     let lsp = lsp_with(&fake);
-    lsp.open(Path::new(FILE), &TextEditingController::with_text(TEXT), Rc::new(|| {}));
+    lsp.open(
+        Path::new(FILE),
+        &TextEditingController::with_text(TEXT),
+        Rc::new(|| {}),
+    );
     settle(&venus);
     let _ = fake.requests();
     fake.answer(1, json!({"capabilities": capabilities}));
@@ -40,7 +44,9 @@ type Given = Rc<RefCell<Vec<Option<SemanticTokens>>>>;
 fn ask(lsp: &Lsp) -> (Option<i64>, Given) {
     let given: Given = Rc::default();
     let into = Rc::clone(&given);
-    let id = lsp.semantic_tokens(Path::new(FILE), move |tokens| into.borrow_mut().push(tokens));
+    let id = lsp.semantic_tokens(Path::new(FILE), move |tokens| {
+        into.borrow_mut().push(tokens)
+    });
     (id, given)
 }
 
@@ -62,7 +68,10 @@ fn the_tokens_of_a_file_are_asked_for_by_its_address_and_given_as_bytes_with_wha
     let told = fake.requests();
     assert_eq!(told.len(), 1);
     assert_eq!(told[0].0, "textDocument/semanticTokens/full");
-    assert_eq!(told[0].1, json!({"textDocument": {"uri": "file:///project/src/main.rs"}}));
+    assert_eq!(
+        told[0].1,
+        json!({"textDocument": {"uri": "file:///project/src/main.rs"}})
+    );
     assert_eq!(id, told[0].2);
     fake.answer(id.unwrap(), data());
     settle(&venus);
@@ -71,11 +80,28 @@ fn the_tokens_of_a_file_are_asked_for_by_its_address_and_given_as_bytes_with_wha
     assert_eq!(given.len(), 1, "once");
     let found = given[0].as_ref().expect("the server said");
     // The second line starts at byte 12: `    let mut é` is a character of two bytes at the end, and this server counts bytes.
-    let ranges: Vec<_> = found.tokens.iter().map(|token| token.range.clone()).collect();
+    let ranges: Vec<_> = found
+        .tokens
+        .iter()
+        .map(|token| token.range.clone())
+        .collect();
     assert_eq!(ranges, [0..2, 3..7, 16..19, 20..23, 24..26]);
-    assert_eq!(found.legend.type_name(found.tokens[1].kind), Some("function"));
-    assert_eq!(found.legend.modifier_names(found.tokens[4].modifiers).collect::<Vec<_>>(), ["declaration", "mutable"]);
-    assert_eq!(found.text.len(), TEXT.len(), "and the text they are of is kept, which what moves them over edits is told by");
+    assert_eq!(
+        found.legend.type_name(found.tokens[1].kind),
+        Some("function")
+    );
+    assert_eq!(
+        found
+            .legend
+            .modifier_names(found.tokens[4].modifiers)
+            .collect::<Vec<_>>(),
+        ["declaration", "mutable"]
+    );
+    assert_eq!(
+        found.text.len(),
+        TEXT.len(),
+        "and the text they are of is kept, which what moves them over edits is told by"
+    );
 }
 
 #[test]
@@ -87,7 +113,14 @@ fn a_position_counted_in_utf16_is_the_byte_it_is_in_the_text() {
     fake.answer(id.unwrap(), json!({"data": [1, 12, 1, 1, 0]}));
     settle(&venus);
     let found = given.borrow()[0].clone().unwrap();
-    assert_eq!(found.tokens.iter().map(|token| token.range.clone()).collect::<Vec<_>>(), [24..26]);
+    assert_eq!(
+        found
+            .tokens
+            .iter()
+            .map(|token| token.range.clone())
+            .collect::<Vec<_>>(),
+        [24..26]
+    );
 }
 
 #[test]
@@ -95,10 +128,17 @@ fn a_token_with_no_length_or_that_ends_where_it_starts_is_left_out() {
     let (venus, fake, lsp) = ready(server("utf-8"));
     let (id, given) = ask(&lsp);
     let _ = fake.requests();
-    fake.answer(id.unwrap(), json!({"data": [0, 0, 0, 0, 0, 0, 3, 4, 2, 1, 9, 0, 3, 0, 0]}));
+    fake.answer(
+        id.unwrap(),
+        json!({"data": [0, 0, 0, 0, 0, 0, 3, 4, 2, 1, 9, 0, 3, 0, 0]}),
+    );
     settle(&venus);
     let found = given.borrow()[0].clone().unwrap();
-    assert_eq!(found.tokens.len(), 1, "one with no length, and one on a line that is not there");
+    assert_eq!(
+        found.tokens.len(),
+        1,
+        "one with no length, and one on a line that is not there"
+    );
     assert_eq!(found.tokens[0].range, 3..7);
 }
 
@@ -116,7 +156,12 @@ fn a_file_that_is_not_open_has_none() {
     let (_venus, fake, lsp) = ready(server("utf-8"));
     let given: Given = Rc::default();
     let into = Rc::clone(&given);
-    assert_eq!(lsp.semantic_tokens(Path::new("/project/src/other.rs"), move |tokens| into.borrow_mut().push(tokens)), None);
+    assert_eq!(
+        lsp.semantic_tokens(Path::new("/project/src/other.rs"), move |tokens| into
+            .borrow_mut()
+            .push(tokens)),
+        None
+    );
     assert!(fake.requests().is_empty());
     assert!(matches!(given.borrow().as_slice(), [None]));
 }
@@ -128,7 +173,10 @@ fn an_error_of_the_server_is_none_and_a_cancelled_request_is_not_given() {
     let _ = fake.requests();
     fake.fail(id.unwrap());
     settle(&venus);
-    assert!(matches!(given.borrow().as_slice(), [None]), "the server could not say");
+    assert!(
+        matches!(given.borrow().as_slice(), [None]),
+        "the server could not say"
+    );
 
     let (id, given) = ask(&lsp);
     let _ = fake.requests();
@@ -139,7 +187,8 @@ fn an_error_of_the_server_is_none_and_a_cancelled_request_is_not_given() {
 }
 
 #[test]
-fn what_is_asked_of_a_server_that_says_its_tokens_are_not_as_they_were_is_told_to_whoever_asked_to_know() {
+fn what_is_asked_of_a_server_that_says_its_tokens_are_not_as_they_were_is_told_to_whoever_asked_to_know()
+ {
     let (venus, fake, lsp) = ready(server("utf-8"));
     let told = Rc::new(Cell::new(0));
     let counted = Rc::clone(&told);

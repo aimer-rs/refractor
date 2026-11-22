@@ -2,7 +2,10 @@ use crate::fonts;
 use crate::search::Preview;
 use crate::theme::CodeTheme;
 use aimer::style::{LayoutSpacing, TextAlign, TextOverflow, TextStyle, Theme};
-use aimer::{AnyWidget, BoxAlignment, BuildContext, Color, Column, Container, Dimension, Row, SizedBox, StatelessWidget, Text, Widget};
+use aimer::{
+    AnyWidget, BoxAlignment, BuildContext, Color, Column, Container, Dimension, Row, SizedBox,
+    StatelessWidget, Text, Widget,
+};
 use std::rc::Rc;
 
 /// How tall a line of the preview is, and the part the line numbers take.
@@ -31,7 +34,11 @@ impl SearchPreview {
 impl StatelessWidget for SearchPreview {
     fn build(&self, ctx: &BuildContext) -> impl Widget {
         let theme = *CodeTheme::of(ctx);
-        let code = || TextStyle::new().font_family(fonts::code_family()).font_size(11);
+        let code = || {
+            TextStyle::new()
+                .font_family(fonts::code_family())
+                .font_size(11)
+        };
         let lines: Vec<AnyWidget> = match &self.preview {
             Some(preview) => preview
                 .lines
@@ -46,21 +53,36 @@ impl StatelessWidget for SearchPreview {
                         .box_child(
                             Container::new()
                                 .width(Dimension::Percent(100.0))
-                                .decoration(if focus { theme.marker.with_alpha(0.16) } else { Color::Transparent })
+                                .decoration(if focus {
+                                    theme.marker.with_alpha(0.16)
+                                } else {
+                                    Color::Transparent
+                                })
                                 .child(
-                                    Row::new().vertical_alignment(BoxAlignment::Center).gaps(LayoutSpacing::all(10)).children([
-                                        SizedBox::new()
-                                            .width(NUMBER_WIDTH)
-                                            .box_child(
-                                                Text::new(number.to_string())
-                                                    .text_align(TextAlign::TopRight)
-                                                    .text_style(code().color(if focus { theme.text } else { theme.line_number })),
-                                            )
-                                            .boxed(),
-                                        Text::new(line.clone())
-                                            .text_style(code().color(theme.code).text_overflow(TextOverflow::Clip))
-                                            .boxed(),
-                                    ]),
+                                    Row::new()
+                                        .vertical_alignment(BoxAlignment::Center)
+                                        .gaps(LayoutSpacing::all(10))
+                                        .children([
+                                            SizedBox::new()
+                                                .width(NUMBER_WIDTH)
+                                                .box_child(
+                                                    Text::new(number.to_string())
+                                                        .text_align(TextAlign::TopRight)
+                                                        .text_style(code().color(if focus {
+                                                            theme.text
+                                                        } else {
+                                                            theme.line_number
+                                                        })),
+                                                )
+                                                .boxed(),
+                                            Text::new(line.clone())
+                                                .text_style(
+                                                    code()
+                                                        .color(theme.code)
+                                                        .text_overflow(TextOverflow::Clip),
+                                                )
+                                                .boxed(),
+                                        ]),
                                 ),
                         )
                         .boxed()
@@ -68,12 +90,15 @@ impl StatelessWidget for SearchPreview {
                 .collect(),
             None => Vec::new(),
         };
-        SizedBox::new().width(Dimension::Percent(100.0)).height(HEIGHT).box_child(
-            Container::new()
-                .width(Dimension::Percent(100.0))
-                .decoration(theme.editor)
-                .padding(LayoutSpacing::new().top(PAD).bottom(PAD))
-                .child(Column::new().children(lines)),
-        )
+        SizedBox::new()
+            .width(Dimension::Percent(100.0))
+            .height(HEIGHT)
+            .box_child(
+                Container::new()
+                    .width(Dimension::Percent(100.0))
+                    .decoration(theme.editor)
+                    .padding(LayoutSpacing::new().top(PAD).bottom(PAD))
+                    .child(Column::new().children(lines)),
+            )
     }
 }

@@ -72,8 +72,16 @@ fn reported(hint: &Value) -> Option<Reported> {
     let label = label_of(hint.get("label")?)?;
     Some(Reported {
         at: Position {
-            line: position.get("line")?.as_u64()?.try_into().ok()?,
-            character: position.get("character")?.as_u64()?.try_into().ok()?,
+            line: position
+                .get("line")?
+                .as_u64()?
+                .try_into()
+                .ok()?,
+            character: position
+                .get("character")?
+                .as_u64()?
+                .try_into()
+                .ok()?,
         },
         label,
         kind: match hint.get("kind").and_then(Value::as_u64) {
@@ -81,8 +89,14 @@ fn reported(hint: &Value) -> Option<Reported> {
             Some(2) => HintKind::Parameter,
             _ => HintKind::Other,
         },
-        pad_left: hint.get("paddingLeft").and_then(Value::as_bool).unwrap_or(false),
-        pad_right: hint.get("paddingRight").and_then(Value::as_bool).unwrap_or(false),
+        pad_left: hint
+            .get("paddingLeft")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        pad_right: hint
+            .get("paddingRight")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
     })
 }
 
@@ -90,7 +104,10 @@ fn reported(hint: &Value) -> Option<Reported> {
 fn label_of(label: &Value) -> Option<String> {
     let text = match label {
         Value::String(text) => text.clone(),
-        Value::Array(parts) => parts.iter().filter_map(|part| part.get("value")?.as_str()).collect(),
+        Value::Array(parts) => parts
+            .iter()
+            .filter_map(|part| part.get("value")?.as_str())
+            .collect(),
         _ => return None,
     };
     (!text.is_empty()).then_some(text)
@@ -116,7 +133,17 @@ mod tests {
     fn the_hints_of_a_range_are_asked_for_by_the_file_and_the_lines() {
         assert_eq!(INLAY_HINT, "textDocument/inlayHint");
         assert_eq!(
-            hint_params(&PathBuf::from("/p/src/main.rs"), Position { line: 10, character: 0 }, Position { line: 41, character: 3 }),
+            hint_params(
+                &PathBuf::from("/p/src/main.rs"),
+                Position {
+                    line: 10,
+                    character: 0
+                },
+                Position {
+                    line: 41,
+                    character: 3
+                }
+            ),
             json!({
                 "textDocument": {"uri": "file:///p/src/main.rs"},
                 "range": {"start": {"line": 10, "character": 0}, "end": {"line": 41, "character": 3}},
@@ -132,7 +159,10 @@ mod tests {
         assert_eq!(
             found,
             vec![Reported {
-                at: Position { line: 3, character: 9 },
+                at: Position {
+                    line: 3,
+                    character: 9
+                },
                 label: ": Vec<u32>".to_owned(),
                 kind: HintKind::Type,
                 pad_left: true,
@@ -149,9 +179,18 @@ mod tests {
             hint(2, 0, json!("}"), None),
             hint(2, 1, json!("x"), Some(9)),
         ]));
-        assert_eq!(found.iter().map(|hint| hint.label.as_str()).collect::<Vec<_>>(), ["count:", "}", "x"]);
         assert_eq!(
-            found.iter().map(|hint| hint.kind).collect::<Vec<_>>(),
+            found
+                .iter()
+                .map(|hint| hint.label.as_str())
+                .collect::<Vec<_>>(),
+            ["count:", "}", "x"]
+        );
+        assert_eq!(
+            found
+                .iter()
+                .map(|hint| hint.kind)
+                .collect::<Vec<_>>(),
             [HintKind::Parameter, HintKind::Other, HintKind::Other],
             "no kind, and a kind that is not known, are other"
         );
@@ -169,17 +208,26 @@ mod tests {
             {"position": {"line": 0, "character": 0}},
             hint(5, 2, json!("ok"), Some(1)),
         ]));
-        assert_eq!(found.len(), 1, "a hint that says nothing is nothing to draw");
+        assert_eq!(
+            found.len(),
+            1,
+            "a hint that says nothing is nothing to draw"
+        );
         assert_eq!(found[0].label, "ok");
     }
 
     #[test]
     fn the_server_is_told_that_hints_can_be_drawn_and_what_the_client_does_not_do_with_them() {
         let params = super::super::initialize_params(Path::new("/p"), 1);
-        assert_eq!(params["capabilities"]["textDocument"]["inlayHint"], client_capability());
+        assert_eq!(
+            params["capabilities"]["textDocument"]["inlayHint"],
+            client_capability()
+        );
         assert_eq!(client_capability()["dynamicRegistration"], json!(false));
         assert!(
-            client_capability().get("resolveSupport").is_none(),
+            client_capability()
+                .get("resolveSupport")
+                .is_none(),
             "a label is taken as it comes: there is nothing to resolve"
         );
     }
@@ -187,10 +235,14 @@ mod tests {
     #[test]
     fn what_the_server_can_hint_is_read_from_what_it_answers_to_initialize() {
         let said = |capabilities: Value| {
-            super::super::initialize_result(&json!({"capabilities": capabilities})).unwrap().inlay_hints
+            super::super::initialize_result(&json!({"capabilities": capabilities}))
+                .unwrap()
+                .inlay_hints
         };
         assert!(said(json!({"inlayHintProvider": true})));
-        assert!(said(json!({"inlayHintProvider": {"resolveProvider": true}})));
+        assert!(said(
+            json!({"inlayHintProvider": {"resolveProvider": true}})
+        ));
         assert!(!said(json!({"inlayHintProvider": false})));
         assert!(!said(json!({})));
     }

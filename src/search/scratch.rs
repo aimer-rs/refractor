@@ -7,7 +7,8 @@ pub struct Scratch(PathBuf);
 impl Scratch {
     /// A new empty folder. `name` makes it differ from the folders of the tests that run at the same time.
     pub fn new(name: &str) -> Self {
-        let dir = std::env::temp_dir().join(format!("refractor-search-{name}-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("refractor-search-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("a temporary directory");
         Self(dir)

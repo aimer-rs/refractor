@@ -11,15 +11,28 @@ use super::position::{Encoding, Position};
 mod code_action;
 mod inlay;
 mod lens;
+mod rename;
 mod semantic;
 mod symbols;
-pub use self::semantic::{Legend, Raw as RawToken, SEMANTIC_TOKENS_FULL, SEMANTIC_TOKENS_REFRESH, legend as semantic_legend, token_params as semantic_params, tokens as parse_tokens};
-pub use self::code_action::{Action as ReportedAction, CODE_ACTION, action_params, actions as parse_actions};
-pub use self::inlay::{HintKind, INLAY_HINT, Reported as ReportedHint, hint_params, hints as parse_hints};
-pub use self::symbols::{Symbol, SymbolKind, WORKSPACE_SYMBOL, symbol_params, symbols as parse_symbols};
+pub use self::code_action::{
+    Action as ReportedAction, CODE_ACTION, action_params, actions as parse_actions,
+};
+pub use self::inlay::{
+    HintKind, INLAY_HINT, Reported as ReportedHint, hint_params, hints as parse_hints,
+};
 pub use self::lens::{
     CODE_LENS, CODE_LENS_RESOLVE, LensKind, Unresolved, lens_params, resolved as resolved_lens,
     unresolved as unresolved_lenses,
+};
+pub use self::rename::{
+    REFERENCES, RENAME, WorkspaceEdit, references_params, rename_params, workspace_edit,
+};
+pub use self::semantic::{
+    Legend, Raw as RawToken, SEMANTIC_TOKENS_FULL, SEMANTIC_TOKENS_REFRESH,
+    legend as semantic_legend, token_params as semantic_params, tokens as parse_tokens,
+};
+pub use self::symbols::{
+    Symbol, SymbolKind, WORKSPACE_SYMBOL, symbol_params, symbols as parse_symbols,
 };
 
 /// How the server wants the text it is told about kept up to date.
@@ -216,7 +229,9 @@ fn from_position(position: lsp_types::Position) -> Position {
 /// The settings the server is started with: those of the lenses and those of the symbols, which are different keys.
 fn server_options() -> Value {
     let mut options = lens::server_options();
-    if let (Some(options), Value::Object(symbols)) = (options.as_object_mut(), symbols::server_options()) {
+    if let (Some(options), Value::Object(symbols)) =
+        (options.as_object_mut(), symbols::server_options())
+    {
         options.extend(symbols);
     }
     // What is on disk is checked when a file is saved, with `cargo check`: the errors the compiler finds are the server's to publish.
@@ -1812,17 +1827,30 @@ mod tests {
     #[test]
     fn a_save_is_told_by_the_address_of_the_file_and_the_client_says_it_does_so() {
         assert_eq!(DID_SAVE, "textDocument/didSave");
-        assert_eq!(did_save_params(Path::new("/p/a b.rs")), json!({"textDocument": {"uri": "file:///p/a%20b.rs"}}));
+        assert_eq!(
+            did_save_params(Path::new("/p/a b.rs")),
+            json!({"textDocument": {"uri": "file:///p/a%20b.rs"}})
+        );
         let params = initialize_params(Path::new("/p"), 1);
-        assert_eq!(params["capabilities"]["textDocument"]["synchronization"]["didSave"], json!(true));
+        assert_eq!(
+            params["capabilities"]["textDocument"]["synchronization"]["didSave"],
+            json!(true)
+        );
     }
 
     #[test]
     fn the_server_is_asked_to_check_the_project_when_a_file_is_saved() {
         let options = &initialize_params(Path::new("/p"), 1)["initializationOptions"];
-        assert_eq!(options["checkOnSave"], json!(true), "what rust-analyzer runs `cargo check` for");
+        assert_eq!(
+            options["checkOnSave"],
+            json!(true),
+            "what rust-analyzer runs `cargo check` for"
+        );
         assert_eq!(options["check"]["command"], json!("check"));
-        assert!(options["lens"].is_object(), "and what was asked of it before still is");
+        assert!(
+            options["lens"].is_object(),
+            "and what was asked of it before still is"
+        );
     }
 
     #[test]

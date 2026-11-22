@@ -56,11 +56,16 @@ pub fn actions(result: &Value, path: &Path) -> Vec<Action> {
     let Some(list) = result.as_array() else {
         return Vec::new();
     };
-    list.iter().filter_map(|action| one(action, path)).collect()
+    list.iter()
+        .filter_map(|action| one(action, path))
+        .collect()
 }
 
 /// The edits that `list` says to make in the file, which are all of one file: those that are not made as they should be make none.
-fn edits_of(list: &Value, edits: &mut Vec<((Position, Position), String)>) -> Option<()> {
+pub(super) fn edits_of(
+    list: &Value,
+    edits: &mut Vec<((Position, Position), String)>,
+) -> Option<()> {
     for edit in list.as_array()? {
         let start = edit.pointer("/range/start")?;
         let end = edit.pointer("/range/end")?;
@@ -70,7 +75,10 @@ fn edits_of(list: &Value, edits: &mut Vec<((Position, Position), String)>) -> Op
                 character: u32::try_from(point.get("character")?.as_u64()?).ok()?,
             }))
         };
-        edits.push(((position(start)?, position(end)?), edit.get("newText")?.as_str()?.to_owned()));
+        edits.push((
+            (position(start)?, position(end)?),
+            edit.get("newText")?.as_str()?.to_owned(),
+        ));
     }
     Some(())
 }
@@ -91,7 +99,10 @@ fn one(action: &Value, path: &Path) -> Option<Action> {
     }
     // The edits as the changes of documents, which is how rust-analyzer says them. A change that is not the edits of a document, an
     // operation on a file, is not one that is done here.
-    if let Some(changes) = edit.get("documentChanges").and_then(Value::as_array) {
+    if let Some(changes) = edit
+        .get("documentChanges")
+        .and_then(Value::as_array)
+    {
         for change in changes {
             let uri = change.pointer("/textDocument/uri")?.as_str()?;
             if path_of(uri).as_deref() != Some(path) {
@@ -102,7 +113,10 @@ fn one(action: &Value, path: &Path) -> Option<Action> {
     }
     (!edits.is_empty()).then(|| Action {
         title,
-        preferred: action.get("isPreferred").and_then(Value::as_bool).unwrap_or(false),
+        preferred: action
+            .get("isPreferred")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         edits,
     })
 }
@@ -131,7 +145,8 @@ mod tests {
     }
 
     #[test]
-    fn the_actions_of_a_range_are_asked_for_by_the_file_and_the_range_and_only_what_fixes_a_problem_is() {
+    fn the_actions_of_a_range_are_asked_for_by_the_file_and_the_range_and_only_what_fixes_a_problem_is()
+     {
         assert_eq!(CODE_ACTION, "textDocument/codeAction");
         assert_eq!(
             action_params(&PathBuf::from("/p/src/main.rs"), (at(3, 8), at(3, 10))),
@@ -160,7 +175,13 @@ mod tests {
     fn what_is_not_said_to_be_preferred_is_not_and_the_order_is_the_servers() {
         let second = json!({"title": "Second", "edit": {"changes": {"file:///p/src/main.rs": [edit(1, 0, 1, "x")]}}});
         let found = actions(&json!([second, import()]), Path::new("/p/src/main.rs"));
-        assert_eq!(found.iter().map(|action| (action.title.as_str(), action.preferred)).collect::<Vec<_>>(), [("Second", false), ("Import `std::rc::Rc`", true)]);
+        assert_eq!(
+            found
+                .iter()
+                .map(|action| (action.title.as_str(), action.preferred))
+                .collect::<Vec<_>>(),
+            [("Second", false), ("Import `std::rc::Rc`", true)]
+        );
     }
 
     fn by_document_changes(uri: &str, edits: Vec<Value>) -> Value {
@@ -170,15 +191,29 @@ mod tests {
     #[test]
     fn the_edits_of_a_server_that_says_them_as_changes_of_documents_are_read_as_well() {
         // What rust-analyzer says: a list of the changes of documents, each with the document and its edits.
-        let found = actions(&json!([by_document_changes("file:///p/src/main.rs", vec![edit(0, 0, 0, "use std::rc::Rc;\n")])]), Path::new("/p/src/main.rs"));
+        let found = actions(
+            &json!([by_document_changes(
+                "file:///p/src/main.rs",
+                vec![edit(0, 0, 0, "use std::rc::Rc;\n")]
+            )]),
+            Path::new("/p/src/main.rs"),
+        );
         assert_eq!(found.len(), 1);
-        assert_eq!(found[0].edits, vec![((at(0, 0), at(0, 0)), "use std::rc::Rc;\n".to_owned())]);
+        assert_eq!(
+            found[0].edits,
+            vec![((at(0, 0), at(0, 0)), "use std::rc::Rc;\n".to_owned())]
+        );
         // Edits that are annotated are edits, and what says more than an edit is not read as one.
         let annotated = by_document_changes(
             "file:///p/src/main.rs",
-            vec![json!({"range": {"start": {"line": 1, "character": 0}, "end": {"line": 1, "character": 2}}, "newText": "x", "annotationId": "a"})],
+            vec![
+                json!({"range": {"start": {"line": 1, "character": 0}, "end": {"line": 1, "character": 2}}, "newText": "x", "annotationId": "a"}),
+            ],
         );
-        assert_eq!(actions(&json!([annotated]), Path::new("/p/src/main.rs"))[0].edits[0].1, "x");
+        assert_eq!(
+            actions(&json!([annotated]), Path::new("/p/src/main.rs"))[0].edits[0].1,
+            "x"
+        );
     }
 
     #[test]
@@ -208,24 +243,60 @@ mod tests {
         let elsewhere = json!({"title": "Other file", "edit": {"changes": {"file:///p/src/other.rs": [edit(0, 0, 0, "x")]}}});
         let both = json!({"title": "Two files", "edit": {"changes": {
             "file:///p/src/main.rs": [edit(0, 0, 0, "x")], "file:///p/src/other.rs": [edit(0, 0, 0, "y")]}}});
-        let no_edits = json!({"title": "Nothing", "edit": {"changes": {"file:///p/src/main.rs": []}}});
+        let no_edits =
+            json!({"title": "Nothing", "edit": {"changes": {"file:///p/src/main.rs": []}}});
         let operations = json!({"title": "Files", "edit": {"documentChanges": [{"kind": "create", "uri": "file:///p/new.rs"}]}});
         let empty_changes = json!({"title": "Empty", "edit": {"documentChanges": []}});
         let broken = json!({"title": "Broken", "edit": {"changes": {"file:///p/src/main.rs": [{"range": {"start": {"line": -1, "character": 0}}, "newText": "x"}]}}});
-        let found = actions(&json!([command, unresolved, elsewhere, both, no_edits, operations, empty_changes, broken, import()]), path);
-        assert_eq!(found.iter().map(|action| action.title.as_str()).collect::<Vec<_>>(), ["Import `std::rc::Rc`"]);
-        assert!(actions(&Value::Null, path).is_empty(), "the server had none to say");
+        let found = actions(
+            &json!([
+                command,
+                unresolved,
+                elsewhere,
+                both,
+                no_edits,
+                operations,
+                empty_changes,
+                broken,
+                import()
+            ]),
+            path,
+        );
+        assert_eq!(
+            found
+                .iter()
+                .map(|action| action.title.as_str())
+                .collect::<Vec<_>>(),
+            ["Import `std::rc::Rc`"]
+        );
+        assert!(
+            actions(&Value::Null, path).is_empty(),
+            "the server had none to say"
+        );
         assert!(actions(&json!({"not": "a list"}), path).is_empty());
     }
 
     #[test]
-    fn the_server_is_told_that_the_client_takes_the_actions_that_say_what_they_make_and_lists_of_edits() {
+    fn the_server_is_told_that_the_client_takes_the_actions_that_say_what_they_make_and_lists_of_edits()
+     {
         let params = super::super::initialize_params(Path::new("/p"), 1);
         let action = &params["capabilities"]["textDocument"]["codeAction"];
-        assert_eq!(action["codeActionLiteralSupport"]["codeActionKind"]["valueSet"], json!(["quickfix"]));
+        assert_eq!(
+            action["codeActionLiteralSupport"]["codeActionKind"]["valueSet"],
+            json!(["quickfix"])
+        );
         assert_eq!(action["isPreferredSupport"], json!(true));
-        assert!(action.get("resolveSupport").is_none(), "an action is not resolved: the edits come with it");
-        assert_eq!(params["capabilities"]["workspace"]["workspaceEdit"]["documentChanges"], json!(true));
-        assert!(serde_json::from_value::<lsp_types::InitializeParams>(params).is_ok(), "what the protocol has");
+        assert!(
+            action.get("resolveSupport").is_none(),
+            "an action is not resolved: the edits come with it"
+        );
+        assert_eq!(
+            params["capabilities"]["workspace"]["workspaceEdit"]["documentChanges"],
+            json!(true)
+        );
+        assert!(
+            serde_json::from_value::<lsp_types::InitializeParams>(params).is_ok(),
+            "what the protocol has"
+        );
     }
 }

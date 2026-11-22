@@ -32,8 +32,19 @@ struct Parts {
 }
 
 impl CardSource {
-    pub fn new(lines: Rc<ProblemLines>, lsp: Rc<dyn Fn() -> Lsp>, path: PathBuf, controller: TextEditingController) -> Self {
-        Self { lines, lsp, path, controller, fixes: Rc::default() }
+    pub fn new(
+        lines: Rc<ProblemLines>,
+        lsp: Rc<dyn Fn() -> Lsp>,
+        path: PathBuf,
+        controller: TextEditingController,
+    ) -> Self {
+        Self {
+            lines,
+            lsp,
+            path,
+            controller,
+            fixes: Rc::default(),
+        }
     }
 
     /// Asks for the card for `spot`, and calls `publish` with it each time more of it is known: with none where there is nothing at the
@@ -43,19 +54,30 @@ impl CardSource {
         let start = spot.range.start;
         let found = self.lines.at(start);
         if found.is_empty() {
-            lsp.hover(&self.path, start, move |said| publish(said.map(|hover| Card::docs(spot, hover.markdown))));
+            lsp.hover(&self.path, start, move |said| {
+                publish(said.map(|hover| Card::docs(spot, hover.markdown)))
+            });
             return;
         }
         let problems: Vec<Problem> = found
             .iter()
-            .map(|found| Problem { weight: found.weight, message: found.message.clone(), code: found.code.clone() })
+            .map(|found| Problem {
+                weight: found.weight,
+                message: found.message.clone(),
+                code: found.code.clone(),
+            })
             .collect();
         let parts: Rc<RefCell<Parts>> = Rc::default();
         let emit: Rc<dyn Fn()> = {
             let (parts, spot, publish) = (Rc::clone(&parts), spot.clone(), Rc::clone(&publish));
             Rc::new(move || {
                 let parts = parts.borrow();
-                publish(Some(Card { spot: spot.clone(), markdown: parts.markdown.clone(), problems: problems.clone(), fixes: parts.fixes.clone() }));
+                publish(Some(Card {
+                    spot: spot.clone(),
+                    markdown: parts.markdown.clone(),
+                    problems: problems.clone(),
+                    fixes: parts.fixes.clone(),
+                }));
             })
         };
         emit();
@@ -66,7 +88,12 @@ impl CardSource {
                 words_emit();
             }
         });
-        let (offered, offered_emit, controller, waiting) = (Rc::clone(&parts), Rc::clone(&emit), self.controller.clone(), Rc::clone(&self.fixes));
+        let (offered, offered_emit, controller, waiting) = (
+            Rc::clone(&parts),
+            Rc::clone(&emit),
+            self.controller.clone(),
+            Rc::clone(&self.fixes),
+        );
         let id = lsp.code_actions(&self.path, found[0].range.clone(), move |fixes| {
             waiting.set(None);
             let Some(mut fixes) = fixes else {
@@ -78,7 +105,9 @@ impl CardSource {
                 .into_iter()
                 .map(|fix| {
                     let controller = controller.clone();
-                    Fix::new(fix.title.clone(), fix.preferred, move || fix.apply(&controller))
+                    Fix::new(fix.title.clone(), fix.preferred, move || {
+                        fix.apply(&controller)
+                    })
                 })
                 .collect();
             offered_emit();

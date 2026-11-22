@@ -3,19 +3,27 @@ use aimer::events::file_open;
 use aimer::file_picker::FilePicker;
 use aimer::shortcut::menu::{AppMenu, Menu, set_app_menu};
 use aimer::{
-    AnyWidget, BuildContext, ChildBuilder, ProviderHandle, State, StateView, StatefulWidget, Venus, Widget,
+    AnyWidget, BuildContext, ChildBuilder, ProviderHandle, State, StateView, StatefulWidget, Venus,
+    Widget,
 };
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-/// The chord of the settings item, which is `Cmd+,` on a Mac and `Ctrl+,` elsewhere.
-const SETTINGS_CHORD: &str = "CmdOrCtrl+,";
+pub struct AimerKeyChord;
 
-/// The chord of `File > Open…`.
-const OPEN_CHORD: &str = "CmdOrCtrl+O";
+impl AimerKeyChord {
+    /// The chord of the settings item, which is `Cmd+,` on a Mac and `Ctrl+,` elsewhere.
+    const SETTINGS_CHORD: &str = "CmdOrCtrl+,";
 
-/// The chord of `File > Open Folder…`.
-const OPEN_FOLDER_CHORD: &str = "CmdOrCtrl+Shift+O";
+    /// The chord of `File > Open…`.
+    const OPEN_CHORD: &str = "CmdOrCtrl+O";
+
+    /// The chord of `File > Open Folder…`.
+    const OPEN_FOLDER_CHORD: &str = "CmdOrCtrl+Shift+O";
+
+    /// The chord of `File > Open Folder…`.
+    const REFORMATE_CODE_CHORD: &str = "CmdOrCtrl+Shift+O";
+}
 
 thread_local! {
     /// What the settings item of the menu does, and the number of the registration that set it: the window sets
@@ -31,12 +39,20 @@ thread_local! {
 pub fn install() {
     set_app_menu(
         AppMenu::new()
-            .application_item("Settings\u{2026}", SETTINGS_CHORD, open_settings)
+            .application_item(
+                "Settings\u{2026}",
+                AimerKeyChord::SETTINGS_CHORD,
+                open_settings,
+            )
             .menu(
                 Menu::new("File")
-                    .item("Open\u{2026}", OPEN_CHORD, || pick(false))
-                    .item("Open Folder\u{2026}", OPEN_FOLDER_CHORD, || pick(true)),
-            ),
+                    .item("Open\u{2026}", AimerKeyChord::OPEN_CHORD, || pick(false))
+                    .item(
+                        "Open Folder\u{2026}",
+                        AimerKeyChord::OPEN_FOLDER_CHORD,
+                        || pick(true),
+                    ),
+            ), // .menu(Menu::new("Code").item("Reformate Code")),
     );
 }
 
@@ -176,15 +192,15 @@ mod tests {
 
     #[test]
     fn the_settings_chord_is_one_the_framework_reads() {
-        assert!(KeyChord::parse(SETTINGS_CHORD).is_ok());
-        assert!(KeyChord::parse(OPEN_CHORD).is_ok());
-        assert!(KeyChord::parse(OPEN_FOLDER_CHORD).is_ok());
+        assert!(KeyChord::parse(AimerKeyChord::SETTINGS_CHORD).is_ok());
+        assert!(KeyChord::parse(AimerKeyChord::OPEN_CHORD).is_ok());
+        assert!(KeyChord::parse(AimerKeyChord::OPEN_FOLDER_CHORD).is_ok());
     }
 
     #[test]
     fn the_settings_item_reaches_the_window_that_registered_and_stops_when_it_is_gone() {
         install();
-        let chord = KeyChord::parse(SETTINGS_CHORD).expect("the chord is valid");
+        let chord = KeyChord::parse(AimerKeyChord::SETTINGS_CHORD).expect("the chord is valid");
         let (opened, handler) = counter();
 
         // No window yet: the item is there and does nothing.
@@ -211,7 +227,7 @@ mod tests {
         // A rebuild of the shell makes the new state before the old one is dropped, so the old registration is
         // dropped after the new one was made, and must leave what the new one set.
         install();
-        let chord = KeyChord::parse(SETTINGS_CHORD).expect("the chord is valid");
+        let chord = KeyChord::parse(AimerKeyChord::SETTINGS_CHORD).expect("the chord is valid");
         let (old_count, old_handler) = counter();
         let (new_count, new_handler) = counter();
 
@@ -243,7 +259,7 @@ mod tests {
         // which runs `init_state` and so registers, hands it to the live state to take the configuration from,
         // and drops it. The live state has to be what the menu reaches after that.
         install();
-        let chord = KeyChord::parse(SETTINGS_CHORD).expect("the chord is valid");
+        let chord = KeyChord::parse(AimerKeyChord::SETTINGS_CHORD).expect("the chord is valid");
         let (live_count, live_handler) = counter();
         let (new_count, new_handler) = counter();
         let mut live = state_with(live_handler);

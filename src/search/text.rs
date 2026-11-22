@@ -87,7 +87,10 @@ impl TextSearch {
             }
             // What cannot be read is passed over: a search is not stopped by a folder it has no right to.
             let Ok(entry) = entry else { continue };
-            if !entry.file_type().is_some_and(|kind| kind.is_file()) {
+            if !entry
+                .file_type()
+                .is_some_and(|kind| kind.is_file())
+            {
                 continue;
             }
             let mut sink = Collect {
@@ -115,7 +118,11 @@ struct Collect<'a> {
 impl Sink for Collect<'_> {
     type Error = io::Error;
 
-    fn matched(&mut self, _searcher: &Searcher, matched: &SinkMatch<'_>) -> Result<bool, io::Error> {
+    fn matched(
+        &mut self,
+        _searcher: &Searcher,
+        matched: &SinkMatch<'_>,
+    ) -> Result<bool, io::Error> {
         if self.cancel.load(Ordering::Relaxed) {
             return Ok(false);
         }
@@ -134,7 +141,9 @@ impl Sink for Collect<'_> {
         let (preview, marked) = excerpt(line, at.start()..at.end().min(line.len()));
         self.found.hits.push(TextHit {
             path: self.path.to_path_buf(),
-            line: matched.line_number().map_or(0, |number| number as usize),
+            line: matched
+                .line_number()
+                .map_or(0, |number| number as usize),
             column: at.start(),
             preview,
             marked,
@@ -151,11 +160,16 @@ fn excerpt(line: &str, at: Range<usize>) -> (String, Range<usize>) {
     let mut end = line.len();
     if end - start > TextSearch::PREVIEW {
         start = start.max(at.start.saturating_sub(TextSearch::BEFORE));
-        end = (start + TextSearch::PREVIEW).max(at.end).min(line.len());
+        end = (start + TextSearch::PREVIEW)
+            .max(at.end)
+            .min(line.len());
         start = floor_boundary(line, start);
         end = ceil_boundary(line, end);
     }
-    (line[start..end].to_owned(), at.start - start..at.end - start)
+    (
+        line[start..end].to_owned(),
+        at.start - start..at.end - start,
+    )
 }
 
 fn floor_boundary(text: &str, mut at: usize) -> usize {

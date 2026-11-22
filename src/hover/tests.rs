@@ -92,7 +92,11 @@ fn a_card_that_is_on_screen_is_still_drawn_when_one_that_was_made_after_it_is_go
     cell.show(card("one"));
     assert_eq!(drawn.get(), 1, "the one on screen was told");
     cell.show(card("two"));
-    assert_eq!(drawn.get(), 2, "and again, the one that is gone having been forgotten");
+    assert_eq!(
+        drawn.get(),
+        2,
+        "and again, the one that is gone having been forgotten"
+    );
     cell.hide();
     assert_eq!(drawn.get(), 3);
 }
@@ -152,7 +156,11 @@ fn problem_card(range: std::ops::Range<usize>, fixes: Vec<Fix>) -> Card {
     Card {
         spot: HoverSpot { range, ..spot(0) },
         markdown: String::new(),
-        problems: vec![Problem { weight: Weight::Error, message: "m".to_owned(), code: None }],
+        problems: vec![Problem {
+            weight: Weight::Error,
+            message: "m".to_owned(),
+            code: None,
+        }],
         fixes,
     }
 }
@@ -165,13 +173,23 @@ fn the_list_of_fixes_is_opened_by_asking_and_is_shut_when_the_card_is_for_anothe
     assert!(cell.is_expanded());
     assert_eq!(drawn.get(), 0, "no card, nothing to draw again");
     cell.toggle_expanded();
-    cell.show(problem_card(0..3, vec![Fix::new("a", true, || true), Fix::new("b", false, || true)]));
+    cell.show(problem_card(
+        0..3,
+        vec![Fix::new("a", true, || true), Fix::new("b", false, || true)],
+    ));
     assert_eq!(drawn.get(), 1);
     cell.toggle_expanded();
     assert!(cell.is_expanded());
     assert_eq!(drawn.get(), 2, "the card is drawn again with the list");
     // The same place, said again with more: the list stays open.
-    cell.show(problem_card(0..3, vec![Fix::new("a", true, || true), Fix::new("b", false, || true), Fix::new("c", false, || true)]));
+    cell.show(problem_card(
+        0..3,
+        vec![
+            Fix::new("a", true, || true),
+            Fix::new("b", false, || true),
+            Fix::new("c", false, || true),
+        ],
+    ));
     assert!(cell.is_expanded());
     // Another place: it is another card.
     cell.show(problem_card(10..13, vec![Fix::new("a", true, || true)]));
@@ -182,7 +200,8 @@ fn the_list_of_fixes_is_opened_by_asking_and_is_shut_when_the_card_is_for_anothe
 }
 
 #[test]
-fn the_fix_for_the_key_is_the_first_of_the_card_and_there_is_none_without_a_card_or_without_fixes() {
+fn the_fix_for_the_key_is_the_first_of_the_card_and_there_is_none_without_a_card_or_without_fixes()
+{
     let cell = Rc::new(HoverCell::default());
     assert!(cell.first_fix().is_none() && !cell.has_more_fixes());
     cell.show(problem_card(0..3, Vec::new()));
@@ -191,7 +210,16 @@ fn the_fix_for_the_key_is_the_first_of_the_card_and_there_is_none_without_a_card
     let (first, second) = (Rc::clone(&done), Rc::clone(&done));
     cell.show(problem_card(
         0..3,
-        vec![Fix::new("first", true, move || { first.set(first.get() + 1); true }), Fix::new("second", false, move || { second.set(second.get() + 10); true })],
+        vec![
+            Fix::new("first", true, move || {
+                first.set(first.get() + 1);
+                true
+            }),
+            Fix::new("second", false, move || {
+                second.set(second.get() + 10);
+                true
+            }),
+        ],
     ));
     assert!(cell.has_more_fixes());
     let fix = cell.first_fix().expect("the first");
@@ -205,8 +233,15 @@ fn the_fix_for_the_key_is_the_first_of_the_card_and_there_is_none_without_a_card
 #[test]
 fn two_cards_with_the_same_fixes_are_the_same_card_and_with_other_fixes_are_not() {
     let fix = Fix::new("a", true, || true);
-    assert_eq!(problem_card(0..3, vec![fix.clone()]), problem_card(0..3, vec![fix.clone()]));
-    assert_ne!(problem_card(0..3, vec![fix]), problem_card(0..3, vec![Fix::new("a", true, || true)]), "a fix is its own");
+    assert_eq!(
+        problem_card(0..3, vec![fix.clone()]),
+        problem_card(0..3, vec![fix.clone()])
+    );
+    assert_ne!(
+        problem_card(0..3, vec![fix]),
+        problem_card(0..3, vec![Fix::new("a", true, || true)]),
+        "a fix is its own"
+    );
 }
 
 /// What is asked, and what answers.

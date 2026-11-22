@@ -253,7 +253,11 @@ fn rows_of(menu: &Menu, theme: &CodeTheme) -> Vec<AnyWidget> {
             let name = Label::name(&row.item.label, row.item.kind);
             let (typed, rest) = name.split_at(row.typed.min(name.len()));
             let glyph = glyph_of(row.item);
-            let detail = row.item.detail.as_deref().filter(|detail| !detail.is_empty());
+            let detail = row
+                .item
+                .detail
+                .as_deref()
+                .filter(|detail| !detail.is_empty());
             let signature = detail.and_then(Call::signature);
             let view = RowView {
                 typed: typed.to_owned(),
@@ -297,7 +301,11 @@ fn row_widget(view: &RowView, theme: CodeTheme) -> impl Widget + use<> {
         theme.text
     };
     // What goes with the name is dimmer than the name, and is as plain as it on the row that is chosen.
-    let dim = if view.selected { plain.with_alpha(0.8) } else { plain.with_alpha(0.55) };
+    let dim = if view.selected {
+        plain.with_alpha(0.8)
+    } else {
+        plain.with_alpha(0.55)
+    };
     // One look for what is chosen, whether the keys or the pointer chose it: the pink of the app, as softly as the list of usages
     // marks its row.
     let background = if view.selected {
@@ -320,16 +328,27 @@ fn row_widget(view: &RowView, theme: CodeTheme) -> impl Widget + use<> {
                     if view.badge {
                         Badge::new(view.glyph).boxed()
                     } else {
-                        SizedBox::new().width(Badge::SIZE).height(Badge::SIZE).boxed()
+                        SizedBox::new()
+                            .width(Badge::SIZE)
+                            .height(Badge::SIZE)
+                            .boxed()
                     },
                     Line::new()
                         .children([
                             // What was typed is the pink of the app, and the whole name is bold.
                             Text::new(view.typed.clone())
-                                .text_style(code().font_weight(FontWeight::Bold).color(theme.marker))
+                                .text_style(
+                                    code()
+                                        .font_weight(FontWeight::Bold)
+                                        .color(theme.marker),
+                                )
                                 .boxed(),
                             Text::new(view.rest.clone())
-                                .text_style(code().font_weight(FontWeight::Bold).color(plain))
+                                .text_style(
+                                    code()
+                                        .font_weight(FontWeight::Bold)
+                                        .color(plain),
+                                )
                                 .boxed(),
                         ])
                         .boxed(),
@@ -337,8 +356,20 @@ fn row_widget(view: &RowView, theme: CodeTheme) -> impl Widget + use<> {
                     // left, and are cut when it does not fit.
                     Expanded::new()
                         .child(
-                            Text::new(format!("{}{}", view.params, if view.label_detail.is_empty() { String::new() } else { format!(" {}", view.label_detail) }))
-                                .text_style(code().color(dim).text_overflow(TextOverflow::Clip)),
+                            Text::new(format!(
+                                "{}{}",
+                                view.params,
+                                if view.label_detail.is_empty() {
+                                    String::new()
+                                } else {
+                                    format!(" {}", view.label_detail)
+                                }
+                            ))
+                            .text_style(
+                                code()
+                                    .color(dim)
+                                    .text_overflow(TextOverflow::Clip),
+                            ),
                         )
                         .boxed(),
                     SizedBox::new()
@@ -346,7 +377,11 @@ fn row_widget(view: &RowView, theme: CodeTheme) -> impl Widget + use<> {
                         .box_child(
                             Text::new(view.detail.clone())
                                 .text_align(TextAlign::TopRight)
-                                .text_style(code().color(dim).text_overflow(TextOverflow::Clip)),
+                                .text_style(
+                                    code()
+                                        .color(dim)
+                                        .text_overflow(TextOverflow::Clip),
+                                ),
                         )
                         .boxed(),
                 ]),
@@ -443,7 +478,15 @@ mod tests {
     #[test]
     fn a_keyword_has_no_badge_and_every_other_kind_has() {
         assert!(!has_badge(ItemKind::Keyword));
-        for kind in [ItemKind::Function, ItemKind::Method, ItemKind::Struct, ItemKind::Variable, ItemKind::Field, ItemKind::Module, ItemKind::Constant] {
+        for kind in [
+            ItemKind::Function,
+            ItemKind::Method,
+            ItemKind::Struct,
+            ItemKind::Variable,
+            ItemKind::Field,
+            ItemKind::Module,
+            ItemKind::Constant,
+        ] {
             assert!(has_badge(kind), "{kind:?}");
         }
     }

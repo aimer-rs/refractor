@@ -82,7 +82,11 @@ impl State<HoverCard> for HoverCardState {
         // What is wrong is above the words, and the words are what is scrolled when there is more than the card may be.
         let has_words = !card.markdown.trim().is_empty() || card.problems.is_empty();
         let problems_at_top = problems_height(&card, this.cell.is_expanded());
-        let words_height = if has_words { estimated_height(&words) } else { 0.0 };
+        let words_height = if has_words && card.problems.is_empty() {
+            estimated_height(&words)
+        } else {
+            0.0
+        };
         let estimate = problems_at_top + words_height;
         let scrolls = has_words && estimate > MAX_HEIGHT * SCROLLS_OVER;
         let height = if scrolls { MAX_HEIGHT } else { estimate };
@@ -92,7 +96,11 @@ impl State<HoverCard> for HoverCardState {
             height: card.spot.height,
         };
         // A card that says only what is wrong is as wide as what it says; one that has words to read is wide enough to read them.
-        let width = if card.problems.is_empty() || has_words { WIDTH } else { card_width(&card) };
+        let width = if card.problems.is_empty() || has_words {
+            WIDTH
+        } else {
+            card_width(&card)
+        };
         let (left, top) = Popup::place(anchor, (width, height), card.spot.extent);
         let (entered, left_it) = (Rc::clone(&this.cell), Rc::clone(&this.cell));
         let mut content = Container::new().width(width);
@@ -103,35 +111,29 @@ impl State<HoverCard> for HoverCardState {
             // As tall as what is in it, and not as tall as the room there is.
             content.fit_content()
         };
-        let viewer = markdown::hover_viewer(&words, &markdown::hover_theme(this.mode), scrolls);
-        // What scrolls is given the height it has to scroll in, which is the card's less what is above it, its padding and its frame:
-        // given none, it is as tall as what is in it, has nothing to scroll, and is cut off by the card.
-        let viewer = if scrolls {
-            SizedBox::new()
-                .height((MAX_HEIGHT - CHROME - problems_at_top).max(PROSE_LINE))
-                .box_child(viewer)
-        } else {
-            viewer.boxed()
-        };
+
         let content = if card.problems.is_empty() {
+            let viewer = markdown::hover_viewer(&words, &markdown::hover_theme(this.mode), scrolls);
+            // What scrolls is given the height it has to scroll in, which is the card's less what is above it, its padding and its frame:
+            // given none, it is as tall as what is in it, has nothing to scroll, and is cut off by the card.
+            let viewer = if scrolls {
+                SizedBox::new()
+                    .height((MAX_HEIGHT - CHROME - problems_at_top).max(PROSE_LINE))
+                    .box_child(viewer)
+            } else {
+                viewer.boxed()
+            };
             content
                 .padding(LayoutSpacing::all(PADDING))
                 .decoration(Popup::frame(theme))
                 .child(viewer)
         } else {
             // The problems are the top of the card, and have the padding of their own; the words, if there are any, are under them.
-            let mut parts = vec![problem_section(&card, &this.cell, theme)];
-            if has_words {
-                parts.push(Container::new().padding(LayoutSpacing::all(PADDING)).child(viewer).boxed());
-            }
-            content.decoration(Popup::frame(theme)).child(Column::new().children(parts).boxed())
+            content
+                .decoration(Popup::frame(theme))
+                .child(problem_section(&card, &this.cell, theme))
         };
-        // The pointer on the card keeps it, and off it lets it go as it goes when the pointer leaves the name. The region holds the card,
-        // which scrolls: a wheel over a region is its child's.
-        let tracked = MouseRegion::new()
-            .on_hover_enter(move || entered.pointer_over(true))
-            .on_hover_exit(move || left_it.pointer_over(false))
-            .child(content);
+
         // The layer fills what the card is over, so that the card is inside the bounds of what holds it: a wheel is routed by where it
         // is, and a card that hangs out of a small parent is not found by it, and the text under the card would be scrolled.
         Container::new()
@@ -141,7 +143,12 @@ impl State<HoverCard> for HoverCardState {
                         .left(Dimension::Px(left))
                         .top(Dimension::Px(top))
                         .child(
-                            tracked,
+                            // The pointer on the card keeps it, and off it lets it go as it goes when the pointer leaves the name. The region holds the card,
+                            // which scrolls: a wheel over a region is its child's.
+                            MouseRegion::new()
+                                .on_hover_enter(move || entered.pointer_over(true))
+                                .on_hover_exit(move || left_it.pointer_over(false))
+                                .child(content),
                         ),
                 ),
             )

@@ -119,7 +119,10 @@ impl Redraw {
         if watchers.is_empty() {
             return;
         }
-        let alive: Vec<bool> = watchers.iter().map(|watcher| watcher()).collect();
+        let alive: Vec<bool> = watchers
+            .iter()
+            .map(|watcher| watcher())
+            .collect();
         let mut kept = alive.iter();
         self.watchers
             .borrow_mut()
@@ -205,11 +208,19 @@ mod tests {
             still.get()
         }));
         redraw.fire();
-        assert_eq!((first.get(), second.get()), (1, 1), "both are called, and not only the last that was added");
+        assert_eq!(
+            (first.get(), second.get()),
+            (1, 1),
+            "both are called, and not only the last that was added"
+        );
         second_alive.set(false);
         redraw.fire();
         redraw.fire();
-        assert_eq!((first.get(), second.get()), (3, 2), "the one that is gone is called once more, to say so, and no more");
+        assert_eq!(
+            (first.get(), second.get()),
+            (3, 2),
+            "the one that is gone is called once more, to say so, and no more"
+        );
     }
 
     #[test]

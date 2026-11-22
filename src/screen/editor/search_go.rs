@@ -22,9 +22,15 @@ pub fn apply(space: &mut Workspace, hit: &Hit, notify: Rc<dyn Fn()>) -> Later {
         Target::File { path, at: None } => {
             let _ = space.open(path, notify);
         }
-        Target::File { path, at: Some((line, column)) } => {
+        Target::File {
+            path,
+            at: Some((line, column)),
+        } => {
             // What is marked is the text that was found, which is shown selected as the definition of a name is.
-            let len = hit.marked.first().map_or(0, |marked| marked.len());
+            let len = hit
+                .marked
+                .first()
+                .map_or(0, |marked| marked.len());
             let _ = space.go_to_line(path, *line, *column, len, notify);
         }
         Target::Place(place) => {
@@ -56,7 +62,14 @@ mod tests {
     }
 
     fn hit(target: Target, marked: std::ops::Range<usize>) -> Hit {
-        Hit { kind: Kind::Text, title: String::new(), marked: vec![marked], detail: String::new(), target, score: 0 }
+        Hit {
+            kind: Kind::Text,
+            title: String::new(),
+            marked: vec![marked],
+            detail: String::new(),
+            target,
+            score: 0,
+        }
     }
 
     #[test]
@@ -64,7 +77,17 @@ mod tests {
         let dir = Scratch::new("go-file");
         let a = dir.file("a.txt", "one\n");
         let mut space = Workspace::new(dir.0.clone());
-        let later = apply(&mut space, &hit(Target::File { path: a.clone(), at: None }, 0..0), notify());
+        let later = apply(
+            &mut space,
+            &hit(
+                Target::File {
+                    path: a.clone(),
+                    at: None,
+                },
+                0..0,
+            ),
+            notify(),
+        );
         assert_eq!(later, Later::Nothing);
         assert_eq!(space.active_document().expect("shown").path, a);
     }
@@ -74,7 +97,10 @@ mod tests {
         let dir = Scratch::new("go-line");
         let a = dir.file("a.txt", "one\ntwo needle\n");
         let mut space = Workspace::new(dir.0.clone());
-        let target = Target::File { path: a, at: Some((2, 4)) };
+        let target = Target::File {
+            path: a,
+            at: Some((2, 4)),
+        };
         apply(&mut space, &hit(target, 0..6), notify());
         let active = space.active_document().expect("shown");
         assert_eq!(active.controller.take_locate(), Some(4 + 4..4 + 10));
@@ -85,17 +111,40 @@ mod tests {
         let dir = Scratch::new("go-place");
         let a = dir.file("a.rs", "fn main() {}\n");
         let mut space = Workspace::new(dir.0.clone());
-        let place = Place { path: a, at: Position { line: 0, character: 3 }, end: Position { line: 0, character: 7 } };
+        let place = Place {
+            path: a,
+            at: Position {
+                line: 0,
+                character: 3,
+            },
+            end: Position {
+                line: 0,
+                character: 7,
+            },
+        };
         apply(&mut space, &hit(Target::Place(place), 0..0), notify());
-        assert_eq!(space.active_document().expect("shown").controller.take_locate(), Some(3..7));
+        assert_eq!(
+            space
+                .active_document()
+                .expect("shown")
+                .controller
+                .take_locate(),
+            Some(3..7)
+        );
     }
 
     #[test]
     fn a_file_that_is_gone_changes_nothing() {
         let dir = Scratch::new("go-gone");
         let mut space = Workspace::new(dir.0.clone());
-        let target = Target::File { path: dir.0.join("gone.txt"), at: Some((1, 0)) };
-        assert_eq!(apply(&mut space, &hit(target, 0..1), notify()), Later::Nothing);
+        let target = Target::File {
+            path: dir.0.join("gone.txt"),
+            at: Some((1, 0)),
+        };
+        assert_eq!(
+            apply(&mut space, &hit(target, 0..1), notify()),
+            Later::Nothing
+        );
         assert!(space.documents.is_empty());
     }
 
@@ -103,7 +152,8 @@ mod tests {
     fn the_actions_of_the_workspace_are_done_and_the_ones_that_read_the_disk_are_left_for_later() {
         let dir = Scratch::new("go-actions");
         let mut space = Workspace::new(dir.0.clone());
-        let act = |space: &mut Workspace, id| apply(space, &hit(Target::Action(id), 0..0), notify());
+        let act =
+            |space: &mut Workspace, id| apply(space, &hit(Target::Action(id), 0..0), notify());
         assert_eq!(act(&mut space, ActionId::OpenSettings), Later::Nothing);
         assert!(space.settings_open);
         assert!(!space.problems_open);

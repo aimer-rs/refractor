@@ -8,7 +8,8 @@ struct Scratch(PathBuf);
 
 impl Scratch {
     fn new(name: &str) -> Self {
-        let path = std::env::temp_dir().join(format!("refractor-autosave-{name}-{}", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("refractor-autosave-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&path);
         std::fs::create_dir_all(&path).expect("the temporary folder can be made");
         Self(path)
@@ -61,7 +62,9 @@ fn a_change_is_saved_when_the_delay_has_passed_without_another() {
     let scratch = Scratch::new("delay");
     let (service, saved) = service(AutoSaveMode::Delay, Duration::from_millis(100));
     let document = scratch.dirty(1, "a.rs");
-    let first = service.edited(&document).expect("a wait is begun");
+    let first = service
+        .edited(&document)
+        .expect("a wait is begun");
     // Another change comes before the first wait is over: that wait is for nothing, and the later one is the one.
     let second = service.edited(&document).expect("and another");
     assert_ne!(first, second);
@@ -72,7 +75,11 @@ fn a_change_is_saved_when_the_delay_has_passed_without_another() {
     assert_eq!(*saved.borrow(), [1]);
     assert!(!document.is_dirty());
     service.expired(&document, second);
-    assert_eq!(*saved.borrow(), [1], "once: a document that was saved is not saved again");
+    assert_eq!(
+        *saved.borrow(),
+        [1],
+        "once: a document that was saved is not saved again"
+    );
 }
 
 #[test]
@@ -94,7 +101,10 @@ fn a_wait_that_ends_after_the_way_was_changed_saves_nothing() {
     let wait = service.edited(&document).unwrap();
     service.configure(AutoSaveMode::Off, Duration::from_millis(100));
     service.expired(&document, wait);
-    assert!(saved.borrow().is_empty(), "the user turned it off in the meantime");
+    assert!(
+        saved.borrow().is_empty(),
+        "the user turned it off in the meantime"
+    );
     service.configure(AutoSaveMode::FocusLost, Duration::from_millis(100));
     service.expired(&document, wait);
     assert!(saved.borrow().is_empty(), "and focus lost is not a wait");
@@ -138,11 +148,21 @@ fn the_focus_is_lost_by_a_file_when_another_is_shown_and_the_one_shown_is_still_
     let (a, b) = (scratch.dirty(1, "a.rs"), scratch.dirty(2, "b.rs"));
     let documents = vec![Rc::clone(&a), Rc::clone(&b)];
     service.switched_now(Some(1), &documents);
-    assert!(saved.borrow().is_empty(), "the first one shown: no other had it");
+    assert!(
+        saved.borrow().is_empty(),
+        "the first one shown: no other had it"
+    );
     service.switched_now(Some(1), &documents);
-    assert!(saved.borrow().is_empty(), "and the same one shown again is not a change");
+    assert!(
+        saved.borrow().is_empty(),
+        "and the same one shown again is not a change"
+    );
     service.switched_now(Some(2), &documents);
-    assert_eq!(*saved.borrow(), [1], "the one that was shown goes, and the one that is shown stays");
+    assert_eq!(
+        *saved.borrow(),
+        [1],
+        "the one that was shown goes, and the one that is shown stays"
+    );
     assert!(b.is_dirty());
 }
 
@@ -164,5 +184,8 @@ fn nothing_is_saved_where_there_is_nothing_to_save_with() {
     service.configure(AutoSaveMode::FocusLost, Duration::from_millis(100));
     let document = scratch.dirty(1, "a.rs");
     service.focus_lost(&[Rc::clone(&document)]);
-    assert!(document.is_dirty(), "no saver, and so no save, and no panic");
+    assert!(
+        document.is_dirty(),
+        "no saver, and so no save, and no panic"
+    );
 }

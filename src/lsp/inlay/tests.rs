@@ -16,7 +16,11 @@ fn ready(capabilities: Value) -> (Rc<aimer::Venus>, Fake, Lsp) {
     let venus = installed();
     let fake = Fake::new();
     let lsp = lsp_with(&fake);
-    lsp.open(Path::new(FILE), &TextEditingController::with_text(TEXT), Rc::new(|| {}));
+    lsp.open(
+        Path::new(FILE),
+        &TextEditingController::with_text(TEXT),
+        Rc::new(|| {}),
+    );
     settle(&venus);
     let _ = fake.requests();
     fake.answer(1, json!({"capabilities": capabilities}));
@@ -34,7 +38,9 @@ type Given = Rc<RefCell<Vec<Option<Vec<Hint>>>>>;
 fn ask(lsp: &Lsp, lines: std::ops::Range<usize>) -> (Option<i64>, Given) {
     let given: Given = Rc::default();
     let into = Rc::clone(&given);
-    let id = lsp.inlay_hints(Path::new(FILE), lines, move |hints| into.borrow_mut().push(hints));
+    let id = lsp.inlay_hints(Path::new(FILE), lines, move |hints| {
+        into.borrow_mut().push(hints)
+    });
     (id, given)
 }
 
@@ -56,14 +62,26 @@ fn the_hints_of_some_lines_are_asked_for_and_given_as_bytes_in_the_order_of_the_
     );
     assert_eq!(id, told[0].2);
     // The server may say them in any order.
-    fake.answer(id.unwrap(), json!([type_hint(2, 10, ": i32"), type_hint(1, 9, ": i32")]));
+    fake.answer(
+        id.unwrap(),
+        json!([type_hint(2, 10, ": i32"), type_hint(1, 9, ": i32")]),
+    );
     settle(&venus);
     let given = given.borrow();
     assert_eq!(given.len(), 1, "once");
     let hints = given[0].as_ref().expect("the server said");
     // The second line starts at byte 12 and the third at 27; this server counts bytes, and the é is two.
-    assert_eq!(hints.iter().map(|hint| hint.at).collect::<Vec<_>>(), [21, 37]);
-    assert_eq!((hints[0].label.as_str(), hints[0].kind), (": i32", HintKind::Type));
+    assert_eq!(
+        hints
+            .iter()
+            .map(|hint| hint.at)
+            .collect::<Vec<_>>(),
+        [21, 37]
+    );
+    assert_eq!(
+        (hints[0].label.as_str(), hints[0].kind),
+        (": i32", HintKind::Type)
+    );
 }
 
 #[test]
@@ -77,7 +95,11 @@ fn a_range_never_ends_past_the_text_because_a_server_may_refuse_a_position_that_
         json!({"start": {"line": 0, "character": 0}, "end": {"line": 4, "character": 0}})
     );
     let _ = ask(&lsp, 2..4);
-    assert_eq!(fake.requests()[0].1["range"]["end"], json!({"line": 4, "character": 0}), "the line that is the end is in the text");
+    assert_eq!(
+        fake.requests()[0].1["range"]["end"],
+        json!({"line": 4, "character": 0}),
+        "the line that is the end is in the text"
+    );
 }
 
 #[test]
@@ -85,7 +107,11 @@ fn a_range_of_a_text_that_has_no_line_break_at_its_end_ends_at_the_end_of_its_la
     let venus = installed();
     let fake = Fake::new();
     let lsp = lsp_with(&fake);
-    lsp.open(Path::new(FILE), &TextEditingController::with_text("fn a() {}\nfn é() {}"), Rc::new(|| {}));
+    lsp.open(
+        Path::new(FILE),
+        &TextEditingController::with_text("fn a() {}\nfn é() {}"),
+        Rc::new(|| {}),
+    );
     settle(&venus);
     let _ = fake.requests();
     fake.answer(1, json!({"capabilities": utf8_server()}));
@@ -93,7 +119,10 @@ fn a_range_of_a_text_that_has_no_line_break_at_its_end_ends_at_the_end_of_its_la
     let _ = fake.requests();
     let _ = ask(&lsp, 0..50);
     // The second line is nine characters of ten bytes, and this server counts bytes.
-    assert_eq!(fake.requests()[0].1["range"]["end"], json!({"line": 1, "character": 10}));
+    assert_eq!(
+        fake.requests()[0].1["range"]["end"],
+        json!({"line": 1, "character": 10})
+    );
 }
 
 #[test]
@@ -121,7 +150,12 @@ fn a_file_that_is_not_open_has_none() {
     let (_venus, fake, lsp) = ready(utf8_server());
     let given: Given = Rc::default();
     let into = Rc::clone(&given);
-    assert_eq!(lsp.inlay_hints(Path::new("/project/src/other.rs"), 0..4, move |hints| into.borrow_mut().push(hints)), None);
+    assert_eq!(
+        lsp.inlay_hints(Path::new("/project/src/other.rs"), 0..4, move |hints| into
+            .borrow_mut()
+            .push(hints)),
+        None
+    );
     assert!(fake.requests().is_empty());
     assert_eq!(*given.borrow(), vec![None]);
 }
@@ -148,10 +182,16 @@ fn a_hint_past_the_end_of_its_line_or_of_the_text_is_at_the_end() {
     let (venus, fake, lsp) = ready(utf8_server());
     let (id, given) = ask(&lsp, 0..4);
     let _ = fake.requests();
-    fake.answer(id.unwrap(), json!([type_hint(0, 500, "a"), type_hint(90, 0, "b")]));
+    fake.answer(
+        id.unwrap(),
+        json!([type_hint(0, 500, "a"), type_hint(90, 0, "b")]),
+    );
     settle(&venus);
     let given = given.borrow();
     let hints = given[0].as_ref().unwrap();
-    assert_eq!(hints[0].at, 11, "the end of the first line, before its line break");
+    assert_eq!(
+        hints[0].at, 11,
+        "the end of the first line, before its line break"
+    );
     assert_eq!(hints[1].at, TEXT.len());
 }

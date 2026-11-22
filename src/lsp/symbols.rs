@@ -13,9 +13,13 @@ impl Lsp {
         query: &str,
         done: impl FnOnce(Option<Vec<Symbol>>) + 'static,
     ) -> Option<i64> {
-        self.ask(protocol::WORKSPACE_SYMBOL, protocol::symbol_params(query), move |answer| {
-            done(answer.map(|answer| protocol::parse_symbols(&answer)));
-        })
+        self.ask(
+            protocol::WORKSPACE_SYMBOL,
+            protocol::symbol_params(query),
+            move |answer| {
+                done(answer.map(|answer| protocol::parse_symbols(&answer)));
+            },
+        )
     }
 }
 
@@ -37,10 +41,17 @@ mod tests {
         let venus = installed();
         let fake = Fake::new();
         let lsp = lsp_with(&fake);
-        lsp.open(Path::new("/project/src/main.rs"), &TextEditingController::with_text("fn a() {}\n"), Rc::new(|| {}));
+        lsp.open(
+            Path::new("/project/src/main.rs"),
+            &TextEditingController::with_text("fn a() {}\n"),
+            Rc::new(|| {}),
+        );
         settle(&venus);
         let _ = fake.requests();
-        fake.answer(1, json!({"capabilities": {"textDocumentSync": 2, "positionEncoding": "utf-8"}}));
+        fake.answer(
+            1,
+            json!({"capabilities": {"textDocumentSync": 2, "positionEncoding": "utf-8"}}),
+        );
         settle(&venus);
         let _ = fake.requests();
         (venus, fake, lsp)
@@ -62,7 +73,10 @@ mod tests {
         let id = id.expect("the server can be asked");
         let sent = fake.requests();
         let (method, params, number) = sent.last().expect("a request was sent");
-        assert_eq!((method.as_str(), params, *number), ("workspace/symbol", &json!({"query": "req"}), Some(id)));
+        assert_eq!(
+            (method.as_str(), params, *number),
+            ("workspace/symbol", &json!({"query": "req"}), Some(id))
+        );
         assert!(given.borrow().is_empty(), "it is not called from inside");
 
         fake.answer(id, json!([{"name": "request", "kind": 12, "containerName": "ureq",

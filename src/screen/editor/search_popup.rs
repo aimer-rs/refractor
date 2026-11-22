@@ -9,8 +9,8 @@ use crate::fonts;
 use crate::search::{Hit, Search, Tab};
 use crate::theme::CodeTheme;
 use crate::workspace::{Workspace, notifier, refresh_status};
-use aimer::events::element::NamedKey;
 use aimer::FocusNode;
+use aimer::events::element::NamedKey;
 use aimer::input::TextEditingController;
 use aimer::input::button::Button;
 use aimer::input::gesture::DragUpdateData;
@@ -18,8 +18,9 @@ use aimer::input::gesture::gesture_detector::GestureDetector;
 use aimer::input::input::TextField;
 use aimer::style::{LayoutSpacing, TextOverflow, Theme};
 use aimer::{
-    AnyWidget, BoxAlignment, BuildContext, Color, Column, Container, Dimension, Expanded, Icons, ProviderHandle,
-    Row, Scrollable, ScrollController, SizedBox, Stack, State, StateUpdater, StateView, StatefulWidget, Text, Vec2d, Widget, ZeroSizedBox,
+    AnyWidget, BoxAlignment, BuildContext, Color, Column, Container, Dimension, Expanded, Icons,
+    ProviderHandle, Row, ScrollController, Scrollable, SizedBox, Stack, State, StateUpdater,
+    StateView, StatefulWidget, Text, Vec2d, Widget, ZeroSizedBox,
 };
 use std::rc::Rc;
 
@@ -42,7 +43,10 @@ const UI_SIZE: u32 = 13;
 
 /// The popup's place after a drag: the offset from the middle of the window, moved by `delta` and kept within what may be reached.
 fn dragged(offset: (f32, f32), delta: (f32, f32)) -> (f32, f32) {
-    ((offset.0 + delta.0).clamp(-DRAG_X, DRAG_X), (offset.1 + delta.1).clamp(-DRAG_Y, DRAG_Y))
+    (
+        (offset.0 + delta.0).clamp(-DRAG_X, DRAG_X),
+        (offset.1 + delta.1).clamp(-DRAG_Y, DRAG_Y),
+    )
 }
 
 /// How much of the room above and below the popup is above it, when it has not been dragged: a quarter, which is a little higher
@@ -53,8 +57,18 @@ const ABOVE: f32 = 0.25;
 /// and the line round it.
 fn card_height(previewing: bool) -> f32 {
     let lines = if previewing { 4.0 } else { 3.0 };
-    let preview = if previewing { search_preview::HEIGHT as f32 } else { 0.0 };
-    search_tabs::HEIGHT as f32 + FIELD_HEIGHT as f32 + list_height(previewing) + preview + FOOTER_HEIGHT as f32 + lines + 2.0
+    let preview = if previewing {
+        search_preview::HEIGHT as f32
+    } else {
+        0.0
+    };
+    search_tabs::HEIGHT as f32
+        + FIELD_HEIGHT as f32
+        + list_height(previewing)
+        + preview
+        + FOOTER_HEIGHT as f32
+        + lines
+        + 2.0
 }
 
 /// How tall a place is kept for the popup: the most it is, which is with the preview. Where the top of the popup is follows from
@@ -71,7 +85,11 @@ fn centering_padding(offset: (f32, f32)) -> LayoutSpacing {
     let side = |distance: f32| distance.round() as u32;
     let across = (offset.0.abs() * 2.0).round() as u32;
     let mut padding = LayoutSpacing::new();
-    padding = if offset.0 >= 0.0 { padding.left(across) } else { padding.right(across) };
+    padding = if offset.0 >= 0.0 {
+        padding.left(across)
+    } else {
+        padding.right(across)
+    };
     if offset.1 >= 0.0 {
         padding.top(side(offset.1 / (1.0 - ABOVE)))
     } else {
@@ -168,7 +186,12 @@ impl State<SearchPopup> for SearchPopupState {
         let theme = *CodeTheme::of(ctx);
         let store = ProviderHandle::<Workspace>::of(ctx);
         let search = Rc::clone(&this.search);
-        let (hits, selected, tab, previewing) = (search.hits(), search.selected(), search.tab(), search.shift());
+        let (hits, selected, tab, previewing) = (
+            search.hits(),
+            search.selected(),
+            search.tab(),
+            search.shift(),
+        );
         let height = list_height(previewing);
 
         // The tabs and the field.
@@ -177,12 +200,19 @@ impl State<SearchPopup> for SearchPopupState {
             Rc::new(move |tab| search.set_tab(tab))
         };
         let on_key = {
-            let (search, close, store, scroll) = (Rc::clone(&search), Rc::clone(&this.close), store.clone(), this.scroll.clone());
+            let (search, close, store, scroll) = (
+                Rc::clone(&search),
+                Rc::clone(&this.close),
+                store.clone(),
+                this.scroll.clone(),
+            );
             move |key: &NamedKey, modifiers: &aimer::events::element::Modifiers| {
                 let step = |delta: isize| {
                     search.move_selection(delta);
                     let height = list_height(search.shift());
-                    if let Some(offset) = reveal_offset(search.selected(), scroll.offset().y, height) {
+                    if let Some(offset) =
+                        reveal_offset(search.selected(), scroll.offset().y, height)
+                    {
                         scroll.jump_to(Vec2d { x: 0.0, y: offset });
                     }
                     true
@@ -204,12 +234,20 @@ impl State<SearchPopup> for SearchPopupState {
                     }
                     // Tab shows the next tab and Shift+Tab the one before; Alt with the arrows to the sides does the same.
                     NamedKey::Tab => {
-                        search.set_tab(search.tab().step(if modifiers.shift { -1 } else { 1 }));
+                        search.set_tab(
+                            search
+                                .tab()
+                                .step(if modifiers.shift { -1 } else { 1 }),
+                        );
                         this_scroll_to_top(&scroll);
                         true
                     }
                     NamedKey::ArrowRight | NamedKey::ArrowLeft if modifiers.alt => {
-                        search.set_tab(search.tab().step(if *key == NamedKey::ArrowRight { 1 } else { -1 }));
+                        search.set_tab(
+                            search
+                                .tab()
+                                .step(if *key == NamedKey::ArrowRight { 1 } else { -1 }),
+                        );
                         this_scroll_to_top(&scroll);
                         true
                     }
@@ -237,14 +275,22 @@ impl State<SearchPopup> for SearchPopupState {
                 })
                 .on_key(on_key)
         };
-        let input = SizedBox::new().width(Dimension::Percent(100.0)).height(FIELD_HEIGHT).box_child(
-            Container::new().padding(LayoutSpacing::new().left(12).right(12)).child(
-                Row::new().vertical_alignment(BoxAlignment::Center).gaps(LayoutSpacing::all(10)).children([
-                    icon(Icons::SEARCH, 15, theme.muted).boxed(),
-                    Expanded::new().child(field).boxed(),
-                ]),
-            ),
-        );
+        let input = SizedBox::new()
+            .width(Dimension::Percent(100.0))
+            .height(FIELD_HEIGHT)
+            .box_child(
+                Container::new()
+                    .padding(LayoutSpacing::new().left(12).right(12))
+                    .child(
+                        Row::new()
+                            .vertical_alignment(BoxAlignment::Center)
+                            .gaps(LayoutSpacing::all(10))
+                            .children([
+                                icon(Icons::SEARCH, 15, theme.muted).boxed(),
+                                Expanded::new().child(field).boxed(),
+                            ]),
+                    ),
+            );
 
         // The hits, or the words that say why there are none.
         let body: AnyWidget = if hits.is_empty() {
@@ -253,7 +299,9 @@ impl State<SearchPopup> for SearchPopupState {
             } else if search.busy() {
                 "Searching\u{2026}".to_owned()
             } else {
-                search.note().map_or_else(|| "No results".to_owned(), str::to_owned)
+                search
+                    .note()
+                    .map_or_else(|| "No results".to_owned(), str::to_owned)
             };
             // As tall as a list is: what is typed goes from having nothing to show to having a list, and the popup must not change
             // size under the one who types.
@@ -263,7 +311,13 @@ impl State<SearchPopup> for SearchPopupState {
                 .box_child(
                     Container::new()
                         .padding(LayoutSpacing::new().top(26).left(14))
-                        .child(Text::new(words).text_style(fonts::ui().font_size(UI_SIZE).color(theme.muted))),
+                        .child(
+                            Text::new(words).text_style(
+                                fonts::ui()
+                                    .font_size(UI_SIZE)
+                                    .color(theme.muted),
+                            ),
+                        ),
                 )
                 .boxed()
         } else {
@@ -272,7 +326,8 @@ impl State<SearchPopup> for SearchPopupState {
                 Rc::new(move |index| search.select(index))
             };
             let go: Rc<dyn Fn(usize)> = {
-                let (search, close, store) = (Rc::clone(&search), Rc::clone(&this.close), store.clone());
+                let (search, close, store) =
+                    (Rc::clone(&search), Rc::clone(&this.close), store.clone());
                 let hits = Rc::clone(&hits);
                 Rc::new(move |index| {
                     if let Some(hit) = hits.get(index) {
@@ -281,17 +336,27 @@ impl State<SearchPopup> for SearchPopupState {
                     }
                 })
             };
-            let rows = hits
-                .iter()
-                .enumerate()
-                .map(|(index, hit)| SearchRow::new(hit.clone(), index, index == selected, Rc::clone(&choose), Rc::clone(&go)).boxed());
+            let rows = hits.iter().enumerate().map(|(index, hit)| {
+                SearchRow::new(
+                    hit.clone(),
+                    index,
+                    index == selected,
+                    Rc::clone(&choose),
+                    Rc::clone(&go),
+                )
+                .boxed()
+            });
             SizedBox::new()
                 .height(height)
                 .box_child(
                     Scrollable::new()
                         .controller(this.scroll.clone())
                         .vertical_scroll_bar(None)
-                        .child(Container::new().padding(LayoutSpacing::all(LIST_PAD)).child(Column::new().children(rows))),
+                        .child(
+                            Container::new()
+                                .padding(LayoutSpacing::all(LIST_PAD))
+                                .child(Column::new().children(rows)),
+                        ),
                 )
                 .boxed()
         };
@@ -304,25 +369,45 @@ impl State<SearchPopup> for SearchPopupState {
         } else {
             format!("{} results", hits.len())
         };
-        let hint = if previewing { "Return to open" } else { "Hold \u{21e7} to preview" };
-        let footer = SizedBox::new().width(Dimension::Percent(100.0)).height(FOOTER_HEIGHT).box_child(
-            Container::new().padding(LayoutSpacing::new().left(12).right(12)).child(
-                Row::new().vertical_alignment(BoxAlignment::Center).children([
-                    Text::new(status)
-                        .text_style(fonts::ui().font_size(11).color(theme.muted).text_overflow(TextOverflow::Clip))
-                        .boxed(),
-                    Expanded::new().child(ZeroSizedBox).boxed(),
-                    Text::new(hint).text_style(fonts::ui().font_size(11).color(theme.muted)).boxed(),
-                ]),
-            ),
-        );
+        let hint = if previewing {
+            "Return to open"
+        } else {
+            "Hold \u{21e7} to preview"
+        };
+        let footer = SizedBox::new()
+            .width(Dimension::Percent(100.0))
+            .height(FOOTER_HEIGHT)
+            .box_child(
+                Container::new()
+                    .padding(LayoutSpacing::new().left(12).right(12))
+                    .child(
+                        Row::new()
+                            .vertical_alignment(BoxAlignment::Center)
+                            .children([
+                                Text::new(status)
+                                    .text_style(
+                                        fonts::ui()
+                                            .font_size(11)
+                                            .color(theme.muted)
+                                            .text_overflow(TextOverflow::Clip),
+                                    )
+                                    .boxed(),
+                                Expanded::new().child(ZeroSizedBox).boxed(),
+                                Text::new(hint)
+                                    .text_style(fonts::ui().font_size(11).color(theme.muted))
+                                    .boxed(),
+                            ]),
+                    ),
+            );
         let mut card: Vec<AnyWidget> = vec![
             // The strip of tabs is what the popup is held by.
             {
                 let updater = this.updater();
                 GestureDetector::new()
                     .on_drag_update(move |drag: DragUpdateData| {
-                        updater.set_state(move |state| state.offset = dragged(state.offset, (drag.delta_x, drag.delta_y)));
+                        updater.set_state(move |state| {
+                            state.offset = dragged(state.offset, (drag.delta_x, drag.delta_y))
+                        });
                     })
                     .child(SearchTabs::new(tab, pick))
                     .boxed()
@@ -350,25 +435,44 @@ impl State<SearchPopup> for SearchPopupState {
             Button::new()
                 .no_decor()
                 .on_press(move || close())
-                .build(|_state| SizedBox::new().width(Dimension::Percent(100.0)).height(Dimension::Percent(100.0)))
+                .build(|_state| {
+                    SizedBox::new()
+                        .width(Dimension::Percent(100.0))
+                        .height(Dimension::Percent(100.0))
+                })
         };
         Container::new().child(
             Stack::new().add_child(barrier).add_child(
                 // A quarter of the room is over the popup and the rest under it: the two spaces share it by their flex.
-                SizedBox::new().width(Dimension::Percent(100.0)).height(Dimension::Percent(100.0)).box_child(
-                    Column::new().horizontal_alignment(BoxAlignment::Center).children([
-                        Expanded::new().flex(ABOVE).child(ZeroSizedBox).boxed(),
-                        // The room that is shared out is what is left of the window by the tallest the card can be, and the card is at the
-                        // top of it: so the top edge of the card is where it is whether or not the preview is shown, which only makes
-                        // the card longer.
-                        Container::new()
-                            .padding(centering_padding(this.offset))
-                            .fit_content()
-                            .child(SizedBox::new().height(anchor_height()).box_child(card))
-                            .boxed(),
-                        Expanded::new().flex(1.0 - ABOVE).child(ZeroSizedBox).boxed(),
-                    ]),
-                ),
+                SizedBox::new()
+                    .width(Dimension::Percent(100.0))
+                    .height(Dimension::Percent(100.0))
+                    .box_child(
+                        Column::new()
+                            .horizontal_alignment(BoxAlignment::Center)
+                            .children([
+                                Expanded::new()
+                                    .flex(ABOVE)
+                                    .child(ZeroSizedBox)
+                                    .boxed(),
+                                // The room that is shared out is what is left of the window by the tallest the card can be, and the card is at the
+                                // top of it: so the top edge of the card is where it is whether or not the preview is shown, which only makes
+                                // the card longer.
+                                Container::new()
+                                    .padding(centering_padding(this.offset))
+                                    .fit_content()
+                                    .child(
+                                        SizedBox::new()
+                                            .height(anchor_height())
+                                            .box_child(card),
+                                    )
+                                    .boxed(),
+                                Expanded::new()
+                                    .flex(1.0 - ABOVE)
+                                    .child(ZeroSizedBox)
+                                    .boxed(),
+                            ]),
+                    ),
             ),
         )
     }
@@ -402,8 +506,14 @@ mod tests {
     fn the_list_is_always_as_tall_as_it_may_be_and_shorter_while_the_preview_is_shown() {
         let pad = (2 * LIST_PAD) as f32;
         assert_eq!(list_height(false), (ROWS as u32 * ROW_HEIGHT) as f32 + pad);
-        assert_eq!(list_height(true), (ROWS_WITH_PREVIEW as u32 * ROW_HEIGHT) as f32 + pad);
-        assert!(list_height(true) < list_height(false), "the preview takes room from the list");
+        assert_eq!(
+            list_height(true),
+            (ROWS_WITH_PREVIEW as u32 * ROW_HEIGHT) as f32 + pad
+        );
+        assert!(
+            list_height(true) < list_height(false),
+            "the preview takes room from the list"
+        );
     }
 
     #[test]
@@ -412,12 +522,28 @@ mod tests {
         let viewport = list_height(false);
         assert_eq!(reveal_offset(0, 0.0, viewport), None);
         let in_view = ((viewport - 2.0 * LIST_PAD as f32) / row) as usize;
-        assert_eq!(reveal_offset(in_view - 1, 0.0, viewport), None, "the last that fits");
+        assert_eq!(
+            reveal_offset(in_view - 1, 0.0, viewport),
+            None,
+            "the last that fits"
+        );
         let below = reveal_offset(in_view, 0.0, viewport).expect("below the view");
-        assert_eq!(below + viewport, 2.0 * LIST_PAD as f32 + in_view as f32 * row + row, "ends where the view ends");
+        assert_eq!(
+            below + viewport,
+            2.0 * LIST_PAD as f32 + in_view as f32 * row + row,
+            "ends where the view ends"
+        );
         assert_eq!(reveal_offset(in_view, below, viewport), None);
-        assert_eq!(reveal_offset(0, 300.0, viewport), Some(0.0), "back to the top");
-        assert_eq!(reveal_offset(5, 400.0, viewport), Some(5.0 * row), "a row above the view is at its top");
+        assert_eq!(
+            reveal_offset(0, 300.0, viewport),
+            Some(0.0),
+            "back to the top"
+        );
+        assert_eq!(
+            reveal_offset(5, 400.0, viewport),
+            Some(5.0 * row),
+            "a row above the view is at its top"
+        );
     }
 
     #[test]
@@ -430,12 +556,24 @@ mod tests {
     #[test]
     fn the_padding_of_a_card_that_is_centred_makes_room_on_the_side_it_moves_from() {
         // Twice the distance on one side, so that what is centred is that far from the middle; none on the other.
-        assert_eq!(centering_padding((0.0, 0.0)), LayoutSpacing::new().left(0).top(0));
+        assert_eq!(
+            centering_padding((0.0, 0.0)),
+            LayoutSpacing::new().left(0).top(0)
+        );
         // Across the room is shared by halves: twice the distance. Down it is shared a quarter above, so the padding above that
         // leaves the card 30 lower is 30 over three quarters, and the padding below that leaves it 30 higher is 30 over a quarter.
-        assert_eq!(centering_padding((20.0, 30.0)), LayoutSpacing::new().left(40).top(40));
-        assert_eq!(centering_padding((-20.0, -30.0)), LayoutSpacing::new().right(40).bottom(120));
-        assert_eq!(centering_padding((-10.4, 0.0)), LayoutSpacing::new().right(21).top(0));
+        assert_eq!(
+            centering_padding((20.0, 30.0)),
+            LayoutSpacing::new().left(40).top(40)
+        );
+        assert_eq!(
+            centering_padding((-20.0, -30.0)),
+            LayoutSpacing::new().right(40).bottom(120)
+        );
+        assert_eq!(
+            centering_padding((-10.4, 0.0)),
+            LayoutSpacing::new().right(21).top(0)
+        );
     }
 
     #[test]
@@ -445,8 +583,12 @@ mod tests {
     }
 
     #[test]
-    fn the_place_kept_for_the_popup_is_the_tallest_it_gets_so_its_top_does_not_move_with_the_preview() {
-        assert!(card_height(true) > card_height(false), "the preview makes it longer");
+    fn the_place_kept_for_the_popup_is_the_tallest_it_gets_so_its_top_does_not_move_with_the_preview()
+     {
+        assert!(
+            card_height(true) > card_height(false),
+            "the preview makes it longer"
+        );
         assert_eq!(anchor_height(), card_height(true));
         assert!(anchor_height() >= card_height(false));
     }

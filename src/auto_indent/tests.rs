@@ -236,12 +236,22 @@ fn a_blank_line_made_by_a_split_goes_with_one_backspace() {
 }
 
 /// Selects `anchor` to `focus` in `text`, presses Tab, or Shift+Tab where `outdent`, and gives the text and the selection that is left.
-fn shifted(text: &str, anchor: usize, focus: usize, spaces: usize, outdent: bool) -> (String, usize, usize) {
+fn shifted(
+    text: &str,
+    anchor: usize,
+    focus: usize,
+    spaces: usize,
+    outdent: bool,
+) -> (String, usize, usize) {
     let controller = TextEditingController::with_text(text);
     controller.select_bytes(anchor, focus);
     AutoIndent::apply_shift(&controller, spaces, outdent);
     let value = controller.value();
-    (value.text().to_string(), value.selection().anchor(), value.selection().focus())
+    (
+        value.text().to_string(),
+        value.selection().anchor(),
+        value.selection().focus(),
+    )
 }
 
 #[test]
@@ -250,7 +260,11 @@ fn tab_over_a_selection_indents_each_line_it_touches_and_keeps_the_same_text_sel
     let text = "aa\nbb\ncc\ndd";
     let (after, anchor, focus) = shifted(text, 1, 7, 4, false);
     assert_eq!(after, "    aa\n    bb\n    cc\ndd");
-    assert_eq!((anchor, focus), (5, 19), "the ends move by what went in before them, so the same letters are selected");
+    assert_eq!(
+        (anchor, focus),
+        (5, 19),
+        "the ends move by what went in before them, so the same letters are selected"
+    );
     assert_eq!(&after[anchor..focus], "a\n    bb\n    c");
     // A selection inside one line indents that line.
     assert_eq!(shifted("fn f() {}", 3, 4, 4, false).0, "    fn f() {}");
@@ -259,10 +273,18 @@ fn tab_over_a_selection_indents_each_line_it_touches_and_keeps_the_same_text_sel
 }
 
 #[test]
-fn a_selection_that_starts_at_the_start_of_a_line_takes_the_indent_in_and_one_that_ends_there_leaves_that_line_alone() {
+fn a_selection_that_starts_at_the_start_of_a_line_takes_the_indent_in_and_one_that_ends_there_leaves_that_line_alone()
+ {
     let (after, anchor, focus) = shifted("aa\nbb\ncc", 0, 6, 4, false);
-    assert_eq!(after, "    aa\n    bb\ncc", "the line the selection ends at the start of is not touched");
-    assert_eq!((anchor, focus), (0, 14), "and the start stays, so the indent is selected and the next Tab goes on from it");
+    assert_eq!(
+        after, "    aa\n    bb\ncc",
+        "the line the selection ends at the start of is not touched"
+    );
+    assert_eq!(
+        (anchor, focus),
+        (0, 14),
+        "and the start stays, so the indent is selected and the next Tab goes on from it"
+    );
     // Backwards: the same selection, with the caret at its start.
     let (_, anchor, focus) = shifted("aa\nbb\ncc", 6, 0, 4, false);
     assert_eq!((anchor, focus), (14, 0), "which end is the caret is kept");
@@ -273,26 +295,48 @@ fn a_selection_that_starts_at_the_start_of_a_line_takes_the_indent_in_and_one_th
 #[test]
 fn empty_lines_are_not_indented_and_blank_ones_are() {
     assert_eq!(shifted("a\n\nb", 0, 4, 4, false).0, "    a\n\n    b");
-    assert_eq!(shifted("a\n  \nb", 0, 6, 4, false).0, "    a\n      \n    b");
+    assert_eq!(
+        shifted("a\n  \nb", 0, 6, 4, false).0,
+        "    a\n      \n    b"
+    );
 }
 
 #[test]
 fn a_block_that_is_indented_with_tabs_is_indented_with_a_tab() {
     assert_eq!(shifted("\ta\n\t\tb", 0, 6, 4, false).0, "\t\ta\n\t\t\tb");
-    assert_eq!(shifted("a\n\tb", 0, 4, 4, false).0, "\ta\n\t\tb", "one line that has a tab says what the block is indented with");
-    assert_eq!(shifted("a\n  b", 0, 5, 4, false).0, "    a\n      b", "spaces are not a tab's");
+    assert_eq!(
+        shifted("a\n\tb", 0, 4, 4, false).0,
+        "\ta\n\t\tb",
+        "one line that has a tab says what the block is indented with"
+    );
+    assert_eq!(
+        shifted("a\n  b", 0, 5, 4, false).0,
+        "    a\n      b",
+        "spaces are not a tab's"
+    );
 }
 
 #[test]
 fn shift_tab_takes_a_level_from_each_line_and_what_is_less_than_a_level_goes_whole() {
     let text = "        a\n    b\n  c\nd\n\te";
     let (after, anchor, focus) = shifted(text, 0, text.len(), 4, true);
-    assert_eq!(after, "    a\nb\nc\nd\ne", "a level of four, or what there is of it, and a tab is one");
-    assert_eq!((anchor, focus), (0, after.len()), "the ends are kept at the ends");
+    assert_eq!(
+        after, "    a\nb\nc\nd\ne",
+        "a level of four, or what there is of it, and a tab is one"
+    );
+    assert_eq!(
+        (anchor, focus),
+        (0, after.len()),
+        "the ends are kept at the ends"
+    );
     // Inside what is taken: the end is brought back to where the taking began, and is not before the line.
     let (after, anchor, focus) = shifted("      x\n      y", 2, 11, 4, true);
     assert_eq!(after, "  x\n  y");
-    assert_eq!((anchor, focus), (0, 4), "a point inside what is taken goes to where it was taken from");
+    assert_eq!(
+        (anchor, focus),
+        (0, 4),
+        "a point inside what is taken goes to where it was taken from"
+    );
     // A line with only a part of a level of spaces before a tab loses the spaces.
     assert_eq!(shifted("  \tx", 0, 4, 4, true).0, "\tx");
 }
@@ -301,7 +345,10 @@ fn shift_tab_takes_a_level_from_each_line_and_what_is_less_than_a_level_goes_who
 fn shift_tab_where_there_is_nothing_to_take_changes_nothing_and_is_still_the_selections() {
     let controller = TextEditingController::with_text("a\nb");
     controller.select_bytes(0, 3);
-    assert!(AutoIndent::apply_shift(&controller, 4, true), "the key is taken, so it does not go on to move the focus");
+    assert!(
+        AutoIndent::apply_shift(&controller, 4, true),
+        "the key is taken, so it does not go on to move the focus"
+    );
     assert_eq!(controller.value().text(), "a\nb");
     assert!(!controller.undo(), "and it was not an edit");
 }
@@ -330,8 +377,15 @@ fn the_indent_is_one_edit_that_one_undo_takes_back() {
 fn lines_ending_in_two_characters_and_text_of_many_bytes_are_indented_where_they_start() {
     let text = "\u{e9}a\r\n\u{e9}\u{301}b\r\nc";
     let (after, anchor, focus) = shifted(text, 2, text.len(), 4, false);
-    assert_eq!(after, "    \u{e9}a\r\n    \u{e9}\u{301}b\r\n    c", "the break is not part of a line, and the letters are not cut");
-    assert_eq!((anchor, focus), (6, after.len()), "the start is after the first accent, which is two bytes, and the end is the end");
+    assert_eq!(
+        after, "    \u{e9}a\r\n    \u{e9}\u{301}b\r\n    c",
+        "the break is not part of a line, and the letters are not cut"
+    );
+    assert_eq!(
+        (anchor, focus),
+        (6, after.len()),
+        "the start is after the first accent, which is two bytes, and the end is the end"
+    );
     let (back, ..) = shifted(&after, 0, after.len(), 4, true);
     assert_eq!(back, text, "and Shift+Tab undoes it exactly");
 }
@@ -345,13 +399,20 @@ fn a_text_with_no_break_at_the_end_and_a_very_long_line_are_indented() {
 }
 
 #[test]
-fn shift_tab_is_the_editors_while_something_is_selected_and_leaves_focus_where_there_is_only_a_caret() {
+fn shift_tab_is_the_editors_while_something_is_selected_and_leaves_focus_where_there_is_only_a_caret()
+ {
     let focus = FocusNode::new();
     let controller = TextEditingController::with_text("ab\ncd");
     let _listener = AutoIndent::hold_tab_while_selected(focus.clone(), controller.clone());
-    assert!(!focus.holds_tab(), "a caret: Shift+Tab moves focus out, as it does everywhere");
+    assert!(
+        !focus.holds_tab(),
+        "a caret: Shift+Tab moves focus out, as it does everywhere"
+    );
     controller.select_bytes(0, 3);
-    assert!(focus.holds_tab(), "a selection: Shift+Tab is for outdenting it, and focus stays");
+    assert!(
+        focus.holds_tab(),
+        "a selection: Shift+Tab is for outdenting it, and focus stays"
+    );
     controller.select_bytes(1, 1);
     assert!(!focus.holds_tab(), "the selection is gone");
     controller.select_bytes(4, 1);

@@ -47,10 +47,7 @@ struct SpinnerState {
 
 impl State<Spinner> for SpinnerState {
     fn create(widget: Spinner) -> Self {
-        Self {
-            size: widget.size,
-        
-        }
+        Self { size: widget.size }
     }
 
     fn adopt_config_from(&mut self, new: Self) {

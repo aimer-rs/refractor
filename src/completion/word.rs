@@ -32,11 +32,36 @@ impl Word {
     }
 }
 
+/// What a word is, and what a comment is, in a language.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WordRules {
+    /// Whether a `-` is part of a word, as in the keys of a manifest.
+    pub hyphen: bool,
+    /// What begins a comment, in which nothing is completed.
+    pub comment: &'static str,
+}
+
+impl WordRules {
+    pub const RUST: Self = Self {
+        hyphen: false,
+        comment: "//",
+    };
+    pub const TOML: Self = Self {
+        hyphen: true,
+        comment: "#",
+    };
+}
+
+/// The word before `caret` as Rust has it: see [`word_before_with`].
+pub fn word_before(text: &TextSnapshot, caret: usize) -> Option<Word> {
+    word_before_with(text, caret, WordRules::RUST)
+}
+
 /// The word before `caret`, a byte offset into `text`. None where nothing is completed: in a comment.
 ///
 /// Only the part of the line the lookback reached is known; a comment that began before it is not seen,
 /// which at worst offers completions in a long comment.
-pub fn word_before(text: &TextSnapshot, caret: usize) -> Option<Word> {
+pub fn word_before_with(text: &TextSnapshot, caret: usize, rules: WordRules) -> Option<Word> {
     let caret = caret.min(text.len());
     let line = text.line_range(text.byte_to_line(caret));
     let mut from = caret.saturating_sub(LOOKBACK).max(line.start);
@@ -44,9 +69,9 @@ pub fn word_before(text: &TextSnapshot, caret: usize) -> Option<Word> {
         from += 1;
     }
     let before = text.slice(from..caret);
-    let at = word_start(&before);
+    let at = word_start(&before, rules);
     let (head, word) = before.split_at(at);
-    if head.contains("//") {
+    if head.contains(rules.comment) {
         return None;
     }
     let triggered = head.ends_with("::") || (head.ends_with('.') && !head.ends_with(".."));
@@ -58,11 +83,11 @@ pub fn word_before(text: &TextSnapshot, caret: usize) -> Option<Word> {
 }
 
 /// Where the word at the end of `before` starts: the run of letters, digits and underscores.
-fn word_start(before: &str) -> usize {
+fn word_start(before: &str, rules: WordRules) -> usize {
     before
         .char_indices()
         .rev()
-        .take_while(|(_, c)| c.is_alphanumeric() || *c == '_')
+        .take_while(|(_, c)| c.is_alphanumeric() || *c == '_' || (rules.hyphen && *c == '-'))
         .last()
         .map_or(before.len(), |(at, _)| at)
 }
@@ -131,6 +156,24 @@ mod tests {
         assert!(
             !completable("x.1st"),
             "a number after a dot is a field of a tuple"
+        );
+    }
+
+    #[test]
+    fn a_manifest_word_has_hyphens_and_its_comment_is_a_hash() {
+        let toml = |text: &str| {
+            word_before_with(&TextSnapshot::from_text(text), text.len(), WordRules::TOML)
+        };
+        let found = toml("opt-lev").expect("a word");
+        assert_eq!((found.start, found.text.as_str()), (0, "opt-lev"));
+        let found = toml("[profile.rel").expect("a word");
+        assert_eq!((found.start, found.text.as_str()), (9, "rel"));
+        assert_eq!(toml("a = 1 # opt-l"), None);
+        assert!(toml("x = \"a//b").is_some(), "// is no comment in TOML");
+        assert_eq!(
+            at_end("opt-lev").expect("a word").text,
+            "lev",
+            "as Rust has it"
         );
     }
 

@@ -28,7 +28,12 @@ impl Lsp {
     /// text, when it has said, or with none when it could not be asked, has no hints to give, or could not say. `done` is not
     /// called from inside this unless it is with none, and not at all if the request is [cancelled](Self::cancel). The number
     /// that is returned is the request's.
-    pub fn inlay_hints(&self, path: &Path, lines: Range<usize>, done: impl FnOnce(Option<Vec<Hint>>) + 'static) -> Option<i64> {
+    pub fn inlay_hints(
+        &self,
+        path: &Path,
+        lines: Range<usize>,
+        done: impl FnOnce(Option<Vec<Hint>>) + 'static,
+    ) -> Option<i64> {
         let text = self.snapshot(path).filter(|_| self.can_hint());
         let Some(text) = text else {
             done(None);

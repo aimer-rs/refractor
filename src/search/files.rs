@@ -25,6 +25,34 @@ pub struct FileHit {
     pub score: i32,
 }
 
+/// Splits a trailing `:line` or `:line:column` off what was typed, as in `src/main.rs:109:5`. The line and the column are
+/// written from 1; the position returned is the line from 1 and the column from 0, which is how a file is gone to. A column
+/// of 0 is taken as the start of the line. What has no such suffix, or nothing before it, is returned as it is.
+pub fn split_position(query: &str) -> (&str, Option<(usize, usize)>) {
+    let number = |text: &str| -> Option<usize> {
+        (!text.is_empty() && text.bytes().all(|b| b.is_ascii_digit()))
+            .then(|| text.parse().ok())
+            .flatten()
+    };
+    let trimmed = query.trim_end();
+    let Some((rest, last)) = trimmed.rsplit_once(':') else {
+        return (query, None);
+    };
+    let Some(last) = number(last) else {
+        return (query, None);
+    };
+    if let Some((path, line)) = rest.rsplit_once(':')
+        && let Some(line) = number(line)
+        && !path.is_empty()
+    {
+        return (path, Some((line.max(1), last.saturating_sub(1))));
+    }
+    if rest.is_empty() {
+        return (query, None);
+    }
+    (rest, Some((last.max(1), 0)))
+}
+
 /// A file of the index.
 #[derive(Debug)]
 struct Entry {
@@ -54,18 +82,30 @@ impl FileIndex {
 
     /// Walks `root` and lists its files, up to `limit` of them. Stops, with an index of nothing, when `cancel` is set.
     pub fn build(root: &Path, limit: usize, cancel: &AtomicBool) -> Self {
-        let mut index = Self { root: root.to_path_buf(), entries: Vec::new(), truncated: false };
-        let walk = WalkBuilder::new(root).require_git(false).sort_by_file_name(|a, b| a.cmp(b)).build();
+        let mut index = Self {
+            root: root.to_path_buf(),
+            entries: Vec::new(),
+            truncated: false,
+        };
+        let walk = WalkBuilder::new(root)
+            .require_git(false)
+            .sort_by_file_name(|a, b| a.cmp(b))
+            .build();
         for entry in walk {
             if cancel.load(Ordering::Relaxed) {
                 index.entries.clear();
                 return index;
             }
             let Ok(entry) = entry else { continue };
-            if !entry.file_type().is_some_and(|kind| kind.is_file()) {
+            if !entry
+                .file_type()
+                .is_some_and(|kind| kind.is_file())
+            {
                 continue;
             }
-            let Ok(relative) = entry.path().strip_prefix(root) else { continue };
+            let Ok(relative) = entry.path().strip_prefix(root) else {
+                continue;
+            };
             if index.entries.len() >= limit {
                 index.truncated = true;
                 break;
@@ -76,7 +116,10 @@ impl FileIndex {
                 .collect::<Vec<_>>()
                 .join("/");
             let name_start = relative.rfind('/').map_or(0, |slash| slash + 1);
-            index.entries.push(Entry { relative, name_start });
+            index.entries.push(Entry {
+                relative,
+                name_start,
+            });
         }
         index
     }
@@ -102,7 +145,11 @@ impl FileIndex {
         let by_path = pattern.has('/');
         let mut fits: Vec<(i32, usize, Vec<Range<usize>>)> = Vec::new();
         for (at, entry) in self.entries.iter().enumerate() {
-            let text = if by_path { entry.relative.as_str() } else { entry.name() };
+            let text = if by_path {
+                entry.relative.as_str()
+            } else {
+                entry.name()
+            };
             if let Some(found) = pattern.matches(text) {
                 fits.push((found.score, at, found.ranges));
             }
@@ -110,7 +157,12 @@ impl FileIndex {
         // The better score first; then the shorter path, which is the nearer to the root; then the order of the folder.
         fits.sort_by(|(a, a_at, _), (b, b_at, _)| {
             b.cmp(a)
-                .then_with(|| self.entries[*a_at].relative.len().cmp(&self.entries[*b_at].relative.len()))
+                .then_with(|| {
+                    self.entries[*a_at]
+                        .relative
+                        .len()
+                        .cmp(&self.entries[*b_at].relative.len())
+                })
                 .then_with(|| a_at.cmp(b_at))
         });
         fits.truncate(limit);
@@ -127,7 +179,9 @@ impl FileIndex {
                 FileHit {
                     path: self.root.join(&entry.relative),
                     name: entry.name().to_owned(),
-                    directory: entry.relative[..entry.name_start].trim_end_matches('/').to_owned(),
+                    directory: entry.relative[..entry.name_start]
+                        .trim_end_matches('/')
+                        .to_owned(),
                     marked,
                     score,
                 }

@@ -11,9 +11,11 @@ use std::path::PathBuf;
 use std::rc::{Rc, Weak};
 
 use aimer::Color;
-use aimer::input::TextEditingController;
 use aimer::input::input::{TextSnapshot, Underline, Underlines};
+use aimer::input::{ControllerListener, TextEditingController};
 
+use crate::cargo::check::Severity;
+use crate::cargo::model::Manifest;
 use crate::components::popup::Redraw;
 use crate::lsp::{Diagnostic, Lsp, Weight};
 
@@ -63,7 +65,8 @@ struct Loaded {
 }
 
 struct Context {
-    lsp: Lsp,
+    /// The server that says what is wrong; none for a manifest, which the schema checks.
+    lsp: Option<Lsp>,
     path: PathBuf,
     controller: TextEditingController,
     colors: LineColors,
@@ -79,6 +82,12 @@ pub struct ProblemLines {
     listening: std::cell::Cell<bool>,
     /// What draws the pane again when the lines change.
     changed: Redraw,
+    /// What is read of the text where the file is a manifest.
+    manifest: Manifest,
+    /// Which check of the manifest is wanted, so that one that is overtaken by another is not made.
+    generation: std::cell::Cell<u64>,
+    /// What looks at the text of a manifest for an edit.
+    watching: RefCell<Option<ControllerListener>>,
 }
 
 impl ProblemLines {
@@ -86,13 +95,28 @@ impl ProblemLines {
     pub const MOST: usize = 1000;
 
     /// Gives the cell the pane it is for, or tells it what changed of it. A new color makes the lines again.
-    pub fn attach(self: &Rc<Self>, lsp: Lsp, path: PathBuf, controller: TextEditingController, colors: LineColors) {
-        let recolored = self.context.borrow().as_ref().is_some_and(|context| context.colors != colors);
+    pub fn attach(
+        self: &Rc<Self>,
+        lsp: Lsp,
+        path: PathBuf,
+        controller: TextEditingController,
+        colors: LineColors,
+    ) {
+        let recolored = self
+            .context
+            .borrow()
+            .as_ref()
+            .is_some_and(|context| context.colors != colors);
         if recolored {
             *self.built.borrow_mut() = None;
         }
         let first = !self.listening.replace(true);
-        *self.context.borrow_mut() = Some(Context { lsp: lsp.clone(), path, controller, colors });
+        *self.context.borrow_mut() = Some(Context {
+            lsp: Some(lsp.clone()),
+            path,
+            controller,
+            colors,
+        });
         if first {
             // The server is asked what is wrong each time what it says may have changed, and what it said before is looked at now.
             let this: Weak<Self> = Rc::downgrade(self);
@@ -107,6 +131,74 @@ impl ProblemLines {
         }
     }
 
+    /// How long after the last edit of a manifest it is checked again.
+    pub const MANIFEST_DELAY: std::time::Duration = std::time::Duration::from_millis(300);
+
+    /// As [`ProblemLines::attach`], for a manifest: nothing is asked of a server, and the text is checked by the schema, now and a moment
+    /// after each edit.
+    pub fn attach_manifest(
+        self: &Rc<Self>,
+        path: PathBuf,
+        controller: TextEditingController,
+        colors: LineColors,
+    ) {
+        let recolored = self
+            .context
+            .borrow()
+            .as_ref()
+            .is_some_and(|context| context.colors != colors);
+        if recolored {
+            *self.built.borrow_mut() = None;
+        }
+        let first = !self.listening.replace(true);
+        *self.context.borrow_mut() = Some(Context {
+            lsp: None,
+            path,
+            controller: controller.clone(),
+            colors,
+        });
+        if first {
+            let (this, last) = (Rc::downgrade(self), RefCell::new(controller.value()));
+            let watched = controller.clone();
+            *self.watching.borrow_mut() = Some(controller.listen(move |_| {
+                // Only a change of the text is an edit: a move of the caret changes what the controller holds too.
+                let now = watched.value();
+                if now.same_text(&last.borrow()) {
+                    return;
+                }
+                *last.borrow_mut() = now;
+                if let Some(this) = this.upgrade() {
+                    this.schedule(Self::MANIFEST_DELAY);
+                }
+            }));
+            self.refresh();
+        }
+    }
+
+    /// Checks the manifest after `delay`, unless another check is wanted by then. Where there is no runtime there is no moment, and nothing
+    /// is done.
+    fn schedule(self: &Rc<Self>, delay: std::time::Duration) {
+        let Some(venus) = aimer::Venus::current() else {
+            return;
+        };
+        let wanted = self.generation.get() + 1;
+        self.generation.set(wanted);
+        let (this, waited) = (Rc::downgrade(self), venus.sleep(delay));
+        venus.spawn(async move {
+            let _ = waited.await;
+            if let Some(this) = this.upgrade()
+                && this.generation.get() == wanted
+            {
+                this.refresh();
+            }
+        });
+    }
+
+    /// What is read of the text where the file is a manifest, which is kept for the text it is of.
+    pub fn manifest(&self) -> &Manifest {
+        &self.manifest
+    }
+
     /// Adds what is called to draw the pane again when the lines change, which says whether the pane is still there.
     pub fn on_change(&self, hook: Rc<dyn Fn() -> bool>) {
         self.changed.add(hook);
@@ -115,13 +207,27 @@ impl ProblemLines {
     /// Looks at what the server says is wrong, and draws the pane again if it is not what it was. What was kept stays while the
     /// server is behind the text and has said nothing of it yet.
     fn refresh(&self) {
-        let Some((lsp, path)) = self.context.borrow().as_ref().map(|context| (context.lsp.clone(), context.path.clone())) else {
+        let Some((lsp, path, controller)) = self.context.borrow().as_ref().map(|context| {
+            (
+                context.lsp.clone(),
+                context.path.clone(),
+                context.controller.clone(),
+            )
+        }) else {
             return;
         };
-        let Some((found, text)) = lsp.diagnostics(&path) else {
-            return;
+        let (marks, text) = match lsp {
+            Some(lsp) => {
+                let Some((found, text)) = lsp.diagnostics(&path) else {
+                    return;
+                };
+                (marks_of(&found, &text), text)
+            }
+            None => {
+                let text = controller.snapshot();
+                (self.manifest_marks(&text), text)
+            }
         };
-        let marks = marks_of(&found, &text);
         let same = match self.loaded.borrow().as_ref() {
             Some(old) => old.marks == marks && old.text.diff(&text).is_none(),
             None => marks.is_empty(),
@@ -134,6 +240,27 @@ impl ProblemLines {
         self.changed.fire();
     }
 
+    /// The lines for what the schema finds wrong in the manifest `text`.
+    fn manifest_marks(&self, text: &TextSnapshot) -> Vec<Mark> {
+        let marks = self
+            .manifest
+            .problems(text)
+            .into_iter()
+            .filter_map(|problem| {
+                Some(Mark {
+                    range: under(&problem.span, text)?,
+                    weight: match problem.severity {
+                        Severity::Error => Weight::Error,
+                        Severity::Warning => Weight::Warning,
+                    },
+                    message: problem.message,
+                    code: None,
+                })
+            })
+            .collect();
+        ordered(marks)
+    }
+
     /// The problems at the byte `byte` of the text as it is now: those whose line is under it, the worst first. What the server said is of
     /// the text it had, and a range is moved over what was typed since, as the lines are.
     pub fn at(&self, byte: usize) -> Vec<Found> {
@@ -141,7 +268,12 @@ impl ProblemLines {
         let Some(loaded) = loaded.as_ref() else {
             return Vec::new();
         };
-        let Some(controller) = self.context.borrow().as_ref().map(|context| context.controller.clone()) else {
+        let Some(controller) = self
+            .context
+            .borrow()
+            .as_ref()
+            .map(|context| context.controller.clone())
+        else {
             return Vec::new();
         };
         let edit = loaded.text.diff(&controller.snapshot());
@@ -170,7 +302,11 @@ impl ProblemLines {
         let colors = self.context.borrow().as_ref()?.colors;
         let loaded = self.loaded.borrow();
         let loaded = loaded.as_ref()?;
-        let items = loaded.marks.iter().map(|mark| Underline::new(mark.range.clone(), colors.of(mark.weight))).collect();
+        let items = loaded
+            .marks
+            .iter()
+            .map(|mark| Underline::new(mark.range.clone(), colors.of(mark.weight)))
+            .collect();
         let built = Underlines::new(items).of_text(loaded.text.clone());
         *self.built.borrow_mut() = Some(built.clone());
         Some(built)
@@ -180,7 +316,7 @@ impl ProblemLines {
 /// The lines for `found`, which are of `text`: the least wrong first, so that the worse is drawn over it, and those that are as wrong
 /// in the order of the text. A file has no more than [`ProblemLines::MOST`], and what is cut is the least wrong.
 fn marks_of(found: &[Diagnostic], text: &TextSnapshot) -> Vec<Mark> {
-    let mut marks: Vec<Mark> = found
+    let marks: Vec<Mark> = found
         .iter()
         .filter_map(|diagnostic| {
             Some(Mark {
@@ -191,17 +327,31 @@ fn marks_of(found: &[Diagnostic], text: &TextSnapshot) -> Vec<Mark> {
             })
         })
         .collect();
+    ordered(marks)
+}
+
+/// `marks` in the order they are drawn, at most [`ProblemLines::MOST`] of them, the worst kept.
+fn ordered(mut marks: Vec<Mark>) -> Vec<Mark> {
     // The worst first, to keep the worst; and then the other way, to draw them.
     marks.sort_by_key(|mark| (mark.weight, mark.range.start, mark.range.end));
     marks.truncate(ProblemLines::MOST);
-    marks.sort_by_key(|mark| (std::cmp::Reverse(mark.weight), mark.range.start, mark.range.end));
+    marks.sort_by_key(|mark| {
+        (
+            std::cmp::Reverse(mark.weight),
+            mark.range.start,
+            mark.range.end,
+        )
+    });
     marks
 }
 
 /// Where `range` of the text before an edit is in the text after it: the edit is the bytes that were replaced and the bytes that replaced
 /// them. A range after it moves by what it added or took away, one before it stays, one that the edit is inside of is longer or shorter by
 /// it, and one that it is only partly in is gone.
-fn moved(range: &Range<usize>, edit: Option<&(Range<usize>, Range<usize>)>) -> Option<Range<usize>> {
+fn moved(
+    range: &Range<usize>,
+    edit: Option<&(Range<usize>, Range<usize>)>,
+) -> Option<Range<usize>> {
     let Some((old, new)) = edit else {
         return Some(range.clone());
     };
@@ -234,7 +384,9 @@ fn under(range: &Range<usize>, text: &TextSnapshot) -> Option<Range<usize>> {
         return Some(start..end);
     }
     // Otherwise the one before it, if that is on this line too.
-    let before = (start.saturating_sub(4)..start).rev().find(|&at| text.is_char_boundary(at))?;
+    let before = (start.saturating_sub(4)..start)
+        .rev()
+        .find(|&at| text.is_char_boundary(at))?;
     (before < start && !is_break(before)).then_some(before..start)
 }
 

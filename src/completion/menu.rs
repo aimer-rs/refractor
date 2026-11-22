@@ -548,7 +548,11 @@ mod tests {
         cell.set(Some(menu_of(&["a", "b"])));
         assert_eq!(drawn.get(), 1);
         cell.set(None);
-        assert_eq!(drawn.get(), 2, "the one that is gone was forgotten, and the other is still told");
+        assert_eq!(
+            drawn.get(),
+            2,
+            "the one that is gone was forgotten, and the other is still told"
+        );
     }
 
     #[test]

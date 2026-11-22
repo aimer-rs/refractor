@@ -6,11 +6,16 @@ use crate::search::ActionId;
 use crate::search::scratch::Scratch;
 
 fn numbered(count: usize) -> String {
-    (1..=count).map(|n| format!("line {n}\n")).collect()
+    (1..=count)
+        .map(|n| format!("line {n}\n"))
+        .collect()
 }
 
 fn at(path: PathBuf, line: usize) -> Target {
-    Target::File { path, at: Some((line, 0)) }
+    Target::File {
+        path,
+        at: Some((line, 0)),
+    }
 }
 
 #[test]
@@ -52,12 +57,21 @@ fn a_place_of_the_server_is_a_line_counted_from_zero() {
     let path = dir.file("a.rs", numbered(20));
     let place = Place {
         path,
-        at: Position { line: 4, character: 0 },
-        end: Position { line: 4, character: 4 },
+        at: Position {
+            line: 4,
+            character: 0,
+        },
+        end: Position {
+            line: 4,
+            character: 4,
+        },
     };
     let preview = Preview::of(&Target::Place(place)).unwrap();
     assert_eq!(preview.focus, Some(5));
-    assert_eq!(preview.lines[preview.focus.unwrap() - preview.first], "line 5");
+    assert_eq!(
+        preview.lines[preview.focus.unwrap() - preview.first],
+        "line 5"
+    );
 }
 
 #[test]
@@ -83,11 +97,18 @@ fn nothing_is_shown_for_an_action_a_missing_file_an_empty_file_or_a_huge_one() {
 fn line_breaks_are_not_in_the_lines_and_a_long_line_is_cut() {
     let dir = Scratch::new("preview-lines");
     let long = "x".repeat(10_000);
-    let path = dir.file("a.txt", format!("one\r\ntwo\r\n{long}\nlast without a break"));
+    let path = dir.file(
+        "a.txt",
+        format!("one\r\ntwo\r\n{long}\nlast without a break"),
+    );
     let preview = Preview::of(&at(path, 1)).unwrap();
     assert_eq!(preview.lines[0], "one");
     assert_eq!(preview.lines[1], "two");
-    assert!(preview.lines[2].len() <= Preview::LINE, "{}", preview.lines[2].len());
+    assert!(
+        preview.lines[2].len() <= Preview::LINE,
+        "{}",
+        preview.lines[2].len()
+    );
     assert_eq!(preview.lines[3], "last without a break");
 }
 

@@ -20,15 +20,27 @@ pub struct Look {
 
 impl Look {
     const fn plain(red: u8, green: u8, blue: u8) -> Self {
-        Self { color: Color::Rgb(red, green, blue), bold: false, underline: false }
+        Self {
+            color: Color::Rgb(red, green, blue),
+            bold: false,
+            underline: false,
+        }
     }
 
     const fn bold(red: u8, green: u8, blue: u8) -> Self {
-        Self { color: Color::Rgb(red, green, blue), bold: true, underline: false }
+        Self {
+            color: Color::Rgb(red, green, blue),
+            bold: true,
+            underline: false,
+        }
     }
 
     const fn underlined(red: u8, green: u8, blue: u8) -> Self {
-        Self { color: Color::Rgb(red, green, blue), bold: false, underline: true }
+        Self {
+            color: Color::Rgb(red, green, blue),
+            bold: false,
+            underline: true,
+        }
     }
 
     /// The style of the text.
@@ -53,7 +65,11 @@ pub struct Rule {
 }
 
 const fn rule(kind: &'static str, modifiers: &'static [&'static str], look: Look) -> Rule {
-    Rule { kind, modifiers, look }
+    Rule {
+        kind,
+        modifiers,
+        look,
+    }
 }
 
 /// The rules of a scheme.
@@ -78,14 +94,22 @@ impl Scheme {
             rule("variable", &["mutable"], Look::underlined(0xFF, 0x6B, 0x81)),
             rule("parameter", &[], Look::plain(0xA9, 0xDC, 0x76)),
             rule("parameter", &["readonly"], Look::plain(0xA9, 0xDC, 0x76)),
-            rule("parameter", &["mutable"], Look::underlined(0xFF, 0x6B, 0x81)),
+            rule(
+                "parameter",
+                &["mutable"],
+                Look::underlined(0xFF, 0x6B, 0x81),
+            ),
             rule("const", &[], Look::bold(0xFF, 0x9C, 0xAC)),
             rule("constParameter", &[], Look::plain(0xFF, 0x9C, 0xAC)),
             rule("variable", &["constant"], Look::bold(0xFF, 0x9C, 0xAC)),
             rule("static", &[], Look::plain(0x7D, 0xCF, 0xFF)),
             rule("static", &["mutable"], Look::underlined(0x7D, 0xCF, 0xFF)),
             rule("variable", &["static"], Look::plain(0x7D, 0xCF, 0xFF)),
-            rule("variable", &["static", "mutable"], Look::underlined(0x7D, 0xCF, 0xFF)),
+            rule(
+                "variable",
+                &["static", "mutable"],
+                Look::underlined(0x7D, 0xCF, 0xFF),
+            ),
         ],
     };
 
@@ -111,7 +135,11 @@ impl Scheme {
             rule("static", &[], Look::plain(0, 120, 170)),
             rule("static", &["mutable"], Look::underlined(0, 120, 170)),
             rule("variable", &["static"], Look::plain(0, 120, 170)),
-            rule("variable", &["static", "mutable"], Look::underlined(0, 120, 170)),
+            rule(
+                "variable",
+                &["static", "mutable"],
+                Look::underlined(0, 120, 170),
+            ),
         ],
     };
 
@@ -128,14 +156,21 @@ impl Scheme {
     pub fn rule_of(&self, kind: &str, modifiers: &[&str]) -> Option<&Rule> {
         self.rules
             .iter()
-            .filter(|rule| rule.kind == kind && rule.modifiers.iter().all(|wanted| modifiers.contains(wanted)))
+            .filter(|rule| {
+                rule.kind == kind
+                    && rule
+                        .modifiers
+                        .iter()
+                        .all(|wanted| modifiers.contains(wanted))
+            })
             .max_by_key(|rule| rule.modifiers.len())
-            // `max_by_key` keeps the last of those that are equal.
+        // `max_by_key` keeps the last of those that are equal.
     }
 
     /// The style of a token of the kind `kind` that has the modifiers `modifiers`, or none where the grammar's color is left.
     pub fn style_for(&self, kind: &str, modifiers: &[&str]) -> Option<SpanStyle> {
-        self.rule_of(kind, modifiers).map(|rule| rule.look.style())
+        self.rule_of(kind, modifiers)
+            .map(|rule| rule.look.style())
     }
 }
 

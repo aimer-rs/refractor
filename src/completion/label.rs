@@ -38,28 +38,75 @@ mod tests {
     #[test]
     fn a_module_is_shown_without_the_colons_the_server_puts_after_it_and_nothing_else_is_changed() {
         assert_eq!(Label::name("unix::", ItemKind::Module), "unix");
-        assert_eq!(Label::name("unix", ItemKind::Module), "unix", "a module the server wrote without them");
-        assert_eq!(Label::name("a::b::", ItemKind::Module), "a::b", "only the last colons");
-        assert_eq!(Label::name("::", ItemKind::Module), "", "nothing else to show");
-        assert_eq!(Label::name("Vec::", ItemKind::Struct), "Vec::", "what is not a module is as it was said");
-        assert_eq!(Label::name("unimplemented!", ItemKind::Function), "unimplemented!");
+        assert_eq!(
+            Label::name("unix", ItemKind::Module),
+            "unix",
+            "a module the server wrote without them"
+        );
+        assert_eq!(
+            Label::name("a::b::", ItemKind::Module),
+            "a::b",
+            "only the last colons"
+        );
+        assert_eq!(
+            Label::name("::", ItemKind::Module),
+            "",
+            "nothing else to show"
+        );
+        assert_eq!(
+            Label::name("Vec::", ItemKind::Struct),
+            "Vec::",
+            "what is not a module is as it was said"
+        );
+        assert_eq!(
+            Label::name("unimplemented!", ItemKind::Function),
+            "unimplemented!"
+        );
     }
 
     #[test]
     fn an_import_is_the_path_without_its_brackets_and_its_use() {
         assert_eq!(Label::detail("(use std::fmt::Debug)"), "std::fmt::Debug");
-        assert_eq!(Label::detail(" (use crate::util::UriExt) "), "crate::util::UriExt", "with blanks round it");
-        assert_eq!(Label::detail("( use a::B )"), "a::B", "and inside the brackets");
-        assert_eq!(Label::detail("use a::B"), "a::B", "a server that says it without the brackets");
-        assert_eq!(Label::detail("(use a::{B, C})"), "a::{B, C}", "a path with brackets of its own keeps them");
+        assert_eq!(
+            Label::detail(" (use crate::util::UriExt) "),
+            "crate::util::UriExt",
+            "with blanks round it"
+        );
+        assert_eq!(
+            Label::detail("( use a::B )"),
+            "a::B",
+            "and inside the brackets"
+        );
+        assert_eq!(
+            Label::detail("use a::B"),
+            "a::B",
+            "a server that says it without the brackets"
+        );
+        assert_eq!(
+            Label::detail("(use a::{B, C})"),
+            "a::{B, C}",
+            "a path with brackets of its own keeps them"
+        );
     }
 
     #[test]
     fn what_is_not_an_import_is_left_as_it_is() {
         assert_eq!(Label::detail("of ToString"), "of ToString");
-        assert_eq!(Label::detail("(self, K, V)"), "(self, K, V)", "brackets that are not an import are kept");
-        assert_eq!(Label::detail("(user)"), "(user)", "a word that only begins like use");
-        assert_eq!(Label::detail("  of Iterator "), "of Iterator", "with the blanks cut");
+        assert_eq!(
+            Label::detail("(self, K, V)"),
+            "(self, K, V)",
+            "brackets that are not an import are kept"
+        );
+        assert_eq!(
+            Label::detail("(user)"),
+            "(user)",
+            "a word that only begins like use"
+        );
+        assert_eq!(
+            Label::detail("  of Iterator "),
+            "of Iterator",
+            "with the blanks cut"
+        );
         assert_eq!(Label::detail(""), "");
         assert_eq!(Label::detail("use"), "use", "nothing after it");
     }

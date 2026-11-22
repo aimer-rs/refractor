@@ -90,7 +90,11 @@ pub fn unresolved(result: &Value) -> Vec<Unresolved> {
             Some(Unresolved {
                 at: Position {
                     line: start.get("line")?.as_u64()?.try_into().ok()?,
-                    character: start.get("character")?.as_u64()?.try_into().ok()?,
+                    character: start
+                        .get("character")?
+                        .as_u64()?
+                        .try_into()
+                        .ok()?,
                 },
                 raw: lens.clone(),
             })
@@ -107,10 +111,17 @@ pub fn resolved(result: &Value) -> Option<Resolved> {
     let start = result.pointer("/range/start")?;
     let at = Position {
         line: start.get("line")?.as_u64()?.try_into().ok()?,
-        character: start.get("character")?.as_u64()?.try_into().ok()?,
+        character: start
+            .get("character")?
+            .as_u64()?
+            .try_into()
+            .ok()?,
     };
     let title = command.get("title")?.as_str()?;
-    let kind = if title.to_ascii_lowercase().contains("implementation") {
+    let kind = if title
+        .to_ascii_lowercase()
+        .contains("implementation")
+    {
         LensKind::Implementations
     } else {
         LensKind::Usages
@@ -180,7 +191,11 @@ mod tests {
             &lens["updateTest"]["enable"],
             &lens["references"]["enumVariant"]["enable"],
         ] {
-            assert_eq!(unwanted, &json!(false), "buttons that run code, and a count for every variant, are not shown");
+            assert_eq!(
+                unwanted,
+                &json!(false),
+                "buttons that run code, and a count for every variant, are not shown"
+            );
         }
     }
 
@@ -195,15 +210,32 @@ mod tests {
     }
 
     #[test]
-    fn the_lenses_that_are_to_be_resolved_are_the_ones_without_a_command_and_keep_what_the_server_sent() {
+    fn the_lenses_that_are_to_be_resolved_are_the_ones_without_a_command_and_keep_what_the_server_sent()
+     {
         let lenses = unresolved(&found());
         assert_eq!(lenses.len(), 2, "the one that runs a test is not one");
-        assert_eq!(lenses[0].at, Position { line: 1, character: 11 });
-        assert_eq!(lenses[0].raw, found()[0], "the lens is sent back as it came");
+        assert_eq!(
+            lenses[0].at,
+            Position {
+                line: 1,
+                character: 11
+            }
+        );
+        assert_eq!(
+            lenses[0].raw,
+            found()[0],
+            "the lens is sent back as it came"
+        );
         assert!(unresolved(&Value::Null).is_empty(), "no lenses");
         assert!(unresolved(&json!({"not": "a list"})).is_empty());
-        assert!(unresolved(&json!([{"data": 1}])).is_empty(), "a lens with no place");
-        assert!(unresolved(&json!([{"range": {"start": {"line": -1, "character": 0}}, "data": 1}])).is_empty());
+        assert!(
+            unresolved(&json!([{"data": 1}])).is_empty(),
+            "a lens with no place"
+        );
+        assert!(
+            unresolved(&json!([{"range": {"start": {"line": -1, "character": 0}}, "data": 1}]))
+                .is_empty()
+        );
     }
 
     fn lens_with(title: &str, locations: Value) -> Value {
@@ -223,19 +255,37 @@ mod tests {
         );
         let resolved = resolved(&lens).expect("a lens that lists places");
         assert_eq!(resolved.kind, LensKind::Usages);
-        assert_eq!(resolved.at, Position { line: 1, character: 11 });
+        assert_eq!(
+            resolved.at,
+            Position {
+                line: 1,
+                character: 11
+            }
+        );
         assert_eq!(
             resolved.places,
             vec![
                 Place {
                     path: PathBuf::from("/p/src/main.rs"),
-                    at: Position { line: 7, character: 15 },
-                    end: Position { line: 7, character: 20 },
+                    at: Position {
+                        line: 7,
+                        character: 15
+                    },
+                    end: Position {
+                        line: 7,
+                        character: 20
+                    },
                 },
                 Place {
                     path: PathBuf::from("/p/src/other.rs"),
-                    at: Position { line: 3, character: 0 },
-                    end: Position { line: 3, character: 5 },
+                    at: Position {
+                        line: 3,
+                        character: 0
+                    },
+                    end: Position {
+                        line: 3,
+                        character: 5
+                    },
                 },
             ]
         );
@@ -247,8 +297,16 @@ mod tests {
             "1 implementation",
             json!([{"uri": "file:///p/src/main.rs", "range": {"start": {"line": 7, "character": 0}, "end": {"line": 11, "character": 1}}}]),
         );
-        assert_eq!(resolved(&implementations).unwrap().kind, LensKind::Implementations);
-        assert_eq!(resolved(&lens_with("3 implementations", json!([]))).unwrap().kind, LensKind::Implementations);
+        assert_eq!(
+            resolved(&implementations).unwrap().kind,
+            LensKind::Implementations
+        );
+        assert_eq!(
+            resolved(&lens_with("3 implementations", json!([])))
+                .unwrap()
+                .kind,
+            LensKind::Implementations
+        );
         let none = resolved(&lens_with("0 references", json!([]))).unwrap();
         assert_eq!((none.kind, none.places.len()), (LensKind::Usages, 0));
     }
@@ -258,7 +316,11 @@ mod tests {
         let run = json!({"range": {"start": {"line": 1, "character": 0}, "end": {"line": 1, "character": 1}},
                          "command": {"title": "Run", "command": "rust-analyzer.runSingle", "arguments": []}});
         assert_eq!(resolved(&run), None, "another command");
-        assert_eq!(resolved(&json!({"range": {"start": {"line": 1, "character": 0}}})), None, "no command");
+        assert_eq!(
+            resolved(&json!({"range": {"start": {"line": 1, "character": 0}}})),
+            None,
+            "no command"
+        );
         assert_eq!(resolved(&Value::Null), None);
         let mut missing = lens_with("1 reference", json!([]));
         missing["command"]["arguments"] = json!(["file:///p/src/main.rs"]);
@@ -271,6 +333,10 @@ mod tests {
                 {"not": "a location"},
             ]),
         );
-        assert_eq!(resolved(&mixed).unwrap().places.len(), 1, "one is in a file and is made as it should be");
+        assert_eq!(
+            resolved(&mixed).unwrap().places.len(),
+            1,
+            "one is in a file and is made as it should be"
+        );
     }
 }

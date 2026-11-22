@@ -10,7 +10,7 @@ use super::call::Call;
 use super::keywords::rust_keywords;
 use super::menu::{Menu, MenuCell};
 use super::rank::rank;
-use super::word::{Word, word_before};
+use super::word::{Word, WordRules, word_before_with};
 use crate::document::Language;
 use crate::lsp::{Answer, Item};
 use aimer::events::element::NamedKey;
@@ -110,8 +110,8 @@ impl Completer {
                 controller,
                 menu,
                 accepting: Cell::new(false),
-                // Only Rust has a source: the server is run for it and for no other language.
-                source: source.filter(|_| language == Language::Rust),
+                // Only Rust and TOML have a source: the server is run for Rust, and the schema read for a manifest.
+                source: source.filter(|_| language.has_completions()),
                 keywords: Rc::new(if language == Language::Rust {
                     rust_keywords()
                 } else {
@@ -125,6 +125,15 @@ impl Completer {
         })
     }
 
+    /// What a word and a comment are in the language of the document.
+    fn rules(&self) -> WordRules {
+        if self.language == Language::Toml {
+            WordRules::TOML
+        } else {
+            WordRules::RUST
+        }
+    }
+
     /// The menu, for what draws it.
     pub fn menu(&self) -> &Rc<MenuCell> {
         &self.menu
@@ -135,7 +144,7 @@ impl Completer {
     pub fn refresh(&self) {
         // A language with nothing to offer reads nothing: not even the snapshot, which for a short
         // text is a copy of all of it.
-        if self.language != Language::Rust {
+        if !self.language.has_completions() {
             return;
         }
         let value = self.controller.value();
@@ -146,8 +155,8 @@ impl Completer {
             self.close();
             return;
         }
-        let Some(word) =
-            word_before(&value.snapshot(), selection.start).filter(Word::is_completable)
+        let Some(word) = word_before_with(&value.snapshot(), selection.start, self.rules())
+            .filter(Word::is_completable)
         else {
             self.close();
             return;

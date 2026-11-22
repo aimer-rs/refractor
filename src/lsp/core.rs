@@ -358,23 +358,36 @@ impl Core {
     }
 
     /// The diagnostics of `path` that are about the text the server has, and that text.
-    pub fn current_diagnostics(&self, path: &Path) -> Option<(Vec<super::session::Diagnostic>, aimer::input::input::TextSnapshot)> {
+    pub fn current_diagnostics(
+        &self,
+        path: &Path,
+    ) -> Option<(
+        Vec<super::session::Diagnostic>,
+        aimer::input::input::TextSnapshot,
+    )> {
         self.session.as_ref()?.current_diagnostics(path)
     }
 
     /// What the server calls the kinds and the modifiers of its tokens, if it has the tokens of a file to give and is ready.
     pub fn legend(&self) -> Option<std::rc::Rc<super::protocol::Legend>> {
-        self.session.as_ref().filter(|session| session.can_semantic()).and_then(Session::legend)
+        self.session
+            .as_ref()
+            .filter(|session| session.can_semantic())
+            .and_then(Session::legend)
     }
 
     /// How many times the server said that its tokens are not as they were, since this was last asked.
     pub fn take_semantic_refreshes(&mut self) -> u64 {
-        self.session.as_mut().map_or(0, Session::take_semantic_refreshes)
+        self.session
+            .as_mut()
+            .map_or(0, Session::take_semantic_refreshes)
     }
 
     /// Whether the server is ready and has hints to give.
     pub fn can_hint(&self) -> bool {
-        self.session.as_ref().is_some_and(Session::can_hint)
+        self.session
+            .as_ref()
+            .is_some_and(Session::can_hint)
     }
 
     /// Makes the request `method` with `params`, whatever it is. The server is told of the edits first. None where it cannot
@@ -395,7 +408,9 @@ impl Core {
 
     /// The text of the file `path` as it is now, if it is one that is open.
     pub fn snapshot(&self, path: &Path) -> Option<aimer::input::input::TextSnapshot> {
-        self.documents.get(path).map(TextEditingController::snapshot)
+        self.documents
+            .get(path)
+            .map(TextEditingController::snapshot)
     }
 
     /// The answers to the requests for a hover that came, which are not given again.
@@ -642,7 +657,10 @@ mod tests {
             rooted_starter(vec![first.clone(), second.clone()], &roots),
         );
         core.track(PathBuf::from(FILE), TextEditingController::with_text("x"));
-        let started = core.sync().started.expect("run on the folder it began with");
+        let started = core
+            .sync()
+            .started
+            .expect("run on the folder it began with");
         assert!(Arc::ptr_eq(&started, &first.mailbox));
 
         assert!(core.set_root(PathBuf::from("/project")), "another folder");
@@ -650,7 +668,10 @@ mod tests {
             first.dropped.get() >= 1,
             "the server of the old folder is let go"
         );
-        let started = core.sync().started.expect("run again, on the new folder");
+        let started = core
+            .sync()
+            .started
+            .expect("run again, on the new folder");
         assert!(Arc::ptr_eq(&started, &second.mailbox));
         assert!(!core.listens_to(&first.mailbox) && core.listens_to(&second.mailbox));
         assert_eq!(

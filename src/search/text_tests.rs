@@ -11,7 +11,16 @@ fn lines(found: &Found) -> Vec<(String, usize)> {
     found
         .hits
         .iter()
-        .map(|hit| (hit.path.file_name().unwrap().to_string_lossy().into_owned(), hit.line))
+        .map(|hit| {
+            (
+                hit.path
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned(),
+                hit.line,
+            )
+        })
         .collect()
 }
 
@@ -21,9 +30,15 @@ fn it_finds_each_line_that_has_the_text_with_its_line_and_column() {
     dir.file("a.rs", "fn main() {}\nlet request = 1;\n");
     dir.file("b.rs", "nothing here\n  request again\n");
     let found = run(&dir, "request");
-    assert_eq!(lines(&found), [("a.rs".to_owned(), 2), ("b.rs".to_owned(), 2)]);
+    assert_eq!(
+        lines(&found),
+        [("a.rs".to_owned(), 2), ("b.rs".to_owned(), 2)]
+    );
     let first = &found.hits[0];
-    assert_eq!((first.column, first.preview.as_str()), (4, "let request = 1;"));
+    assert_eq!(
+        (first.column, first.preview.as_str()),
+        (4, "let request = 1;")
+    );
     assert_eq!(&first.preview[first.marked.clone()], "request");
     // The leading blanks are not in the preview, and the mark is of the preview.
     let second = &found.hits[1];
@@ -90,7 +105,14 @@ fn the_last_line_is_found_without_a_line_break_and_with_a_carriage_return() {
     let dir = Scratch::new("text-ends");
     dir.file("a.txt", "one\r\ntwo needle\r\nthree needle");
     let found = run(&dir, "needle");
-    assert_eq!(found.hits.iter().map(|hit| hit.line).collect::<Vec<_>>(), [2, 3]);
+    assert_eq!(
+        found
+            .hits
+            .iter()
+            .map(|hit| hit.line)
+            .collect::<Vec<_>>(),
+        [2, 3]
+    );
     assert_eq!(found.hits[0].preview, "two needle");
     assert_eq!(found.hits[1].preview, "three needle");
 }
@@ -106,7 +128,12 @@ fn the_column_is_counted_in_bytes_and_the_mark_is_on_character_boundaries() {
     // The combining mark that follows `e` is a character of its own that the match may not split off the letter.
     dir.file("b.txt", "cafe\u{301} cafe\n");
     let found = run(&dir, "cafe");
-    assert!(found.hits.iter().all(|hit| hit.preview.is_char_boundary(hit.marked.end)));
+    assert!(
+        found
+            .hits
+            .iter()
+            .all(|hit| hit.preview.is_char_boundary(hit.marked.end))
+    );
 }
 
 #[test]
@@ -143,7 +170,12 @@ fn a_cancelled_search_gives_up_at_once() {
     assert!(found.hits.is_empty());
     let cancel = AtomicBool::new(false);
     cancel.store(true, Ordering::Relaxed);
-    assert!(TextSearch::new("x").run(dir.path(), 100, &cancel).hits.is_empty());
+    assert!(
+        TextSearch::new("x")
+            .run(dir.path(), 100, &cancel)
+            .hits
+            .is_empty()
+    );
 }
 
 #[test]
@@ -157,6 +189,11 @@ fn a_file_that_cannot_be_read_is_passed_over() {
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
         let found = run(&dir, "x");
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
-        assert!(found.hits.iter().any(|hit| hit.path.ends_with("a.txt")));
+        assert!(
+            found
+                .hits
+                .iter()
+                .any(|hit| hit.path.ends_with("a.txt"))
+        );
     }
 }

@@ -53,13 +53,32 @@ impl SyntaxHighlighter {
     /// If the grammar or its highlights query is not one tree-sitter accepts, which is a fault in
     /// the build and not in any input.
     pub fn rust(palette: SyntaxPalette) -> Self {
-        let language: Language = arborium::lang_rust::language().into();
-        let query = Query::new(&language, arborium::lang_rust::HIGHLIGHTS_QUERY)
-            .expect("the Rust highlights query is valid");
+        Self::of(
+            arborium::lang_rust::language().into(),
+            arborium::lang_rust::HIGHLIGHTS_QUERY,
+            palette,
+        )
+    }
+
+    /// A highlighter for TOML, which is what `Cargo.toml` is written in.
+    ///
+    /// # Panics
+    ///
+    /// As [`SyntaxHighlighter::rust`].
+    pub fn toml(palette: SyntaxPalette) -> Self {
+        Self::of(
+            arborium::lang_toml::language().into(),
+            arborium::lang_toml::HIGHLIGHTS_QUERY,
+            palette,
+        )
+    }
+
+    fn of(language: Language, highlights: &str, palette: SyntaxPalette) -> Self {
+        let query = Query::new(&language, highlights).expect("the highlights query is valid");
         let mut parser = Parser::new();
         parser
             .set_language(&language)
-            .expect("the Rust grammar is one this tree-sitter reads");
+            .expect("the grammar is one this tree-sitter reads");
         let styles = capture_styles(&query, &palette);
         let docs = DocRenderer::new(crate::markdown::doc_theme(crate::settings::ThemeMode::Dark));
         Self {

@@ -12,7 +12,7 @@ mod rank;
 mod word;
 
 pub use call::Call;
-pub use label::Label;
 pub use completer::{Completer, Source};
+pub use label::Label;
 pub use lsp_source::LspSource;
 pub use menu::{Menu, MenuCell};

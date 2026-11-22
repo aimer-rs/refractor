@@ -1,13 +1,15 @@
+use super::usage_row::UsageRowView;
 use crate::components::popup::{Anchor, Popup};
 use crate::fonts;
 use crate::theme::CodeTheme;
-use super::usage_row::UsageRowView;
 use crate::usages::{Heading, UsageEntry, UsageList, Usages};
 use crate::workspace::Workspace;
 use aimer::share::ShareRef;
 use aimer::style::{LayoutSpacing, TextOverflow, TextStyle, Theme};
 use aimer::{
-    AnyWidget, BoxAlignment, BuildContext, Column, Container, Expanded, NumberExt, Positioned, ProviderContext, ProviderHandle, Row as Line, Scrollable, SizedBox, Stack, State, StateUpdater, StateView, StatefulWidget, Text, Vec2d, Widget, ZeroSizedBox,
+    AnyWidget, BoxAlignment, BuildContext, Column, Container, Expanded, NumberExt, Positioned,
+    ProviderContext, ProviderHandle, Row as Line, Scrollable, SizedBox, Stack, State, StateUpdater,
+    StateView, StatefulWidget, Text, Vec2d, Widget, ZeroSizedBox,
 };
 use std::rc::Rc;
 
@@ -66,19 +68,20 @@ impl State<UsagesCard> for UsagesCardState {
             .on_list_change(Popup::redraw_watcher(updater, |state| state.changes += 1));
         // The keys move the choice, and a row that is chosen below what is shown, or above it, is brought in.
         let scroll = self.usages.scroll();
-        self.usages.on_reveal(Rc::new(move |index, count| {
-            // The height of a row is what the list measured, which is not what it was asked to be to the last fraction: it is found from
-            // how far the list scrolls, and a list that has not been measured has rows as tall as they were asked to be.
-            let extent = scroll.max_extent().y;
-            let pitch = if extent > 0.0 && count > 0 {
-                (extent + VIEWPORT - 2.0 * BODY_PADDING as f32) / count as f32
-            } else {
-                ROW_HEIGHT as f32
-            };
-            if let Some(offset) = reveal_offset(index, scroll.offset().y, VIEWPORT, pitch) {
-                scroll.jump_to(Vec2d { x: 0.0, y: offset });
-            }
-        }));
+        self.usages
+            .on_reveal(Rc::new(move |index, count| {
+                // The height of a row is what the list measured, which is not what it was asked to be to the last fraction: it is found from
+                // how far the list scrolls, and a list that has not been measured has rows as tall as they were asked to be.
+                let extent = scroll.max_extent().y;
+                let pitch = if extent > 0.0 && count > 0 {
+                    (extent + VIEWPORT - 2.0 * BODY_PADDING as f32) / count as f32
+                } else {
+                    ROW_HEIGHT as f32
+                };
+                if let Some(offset) = reveal_offset(index, scroll.offset().y, VIEWPORT, pitch) {
+                    scroll.jump_to(Vec2d { x: 0.0, y: offset });
+                }
+            }));
     }
 
     fn adopt_config_from(&mut self, new: Self) {
@@ -96,7 +99,11 @@ impl State<UsagesCard> for UsagesCardState {
         let scrolls = natural > MAX_HEIGHT;
         let height = natural.min(MAX_HEIGHT);
         // A point, which a force click is, has no height of its own: the card hangs below the line it was on.
-        let line = if list.spot.height > 0.0 { list.spot.height } else { 18.0 };
+        let line = if list.spot.height > 0.0 {
+            list.spot.height
+        } else {
+            18.0
+        };
         let anchor = Anchor {
             x: list.spot.x,
             y: list.spot.y,
@@ -117,11 +124,13 @@ impl State<UsagesCard> for UsagesCardState {
             SizedBox::new()
                 .height(body_height)
                 .box_child(
-                    Scrollable::new().controller(this.usages.scroll()).child(
-                        Container::new()
-                            .padding(LayoutSpacing::all(BODY_PADDING))
-                            .child(body),
-                    ),
+                    Scrollable::new()
+                        .controller(this.usages.scroll())
+                        .child(
+                            Container::new()
+                                .padding(LayoutSpacing::all(BODY_PADDING))
+                                .child(body),
+                        ),
                 )
                 .boxed()
         } else {
@@ -157,8 +166,7 @@ impl State<UsagesCard> for UsagesCardState {
 fn natural_height(list: &UsageList) -> f32 {
     let rows = list.len();
     let note = if list.omitted > 0 { NOTE_HEIGHT } else { 0 };
-    LINES
-        + (HEADING_HEIGHT + 2 * BODY_PADDING + note + rows as u32 * ROW_HEIGHT) as f32
+    LINES + (HEADING_HEIGHT + 2 * BODY_PADDING + note + rows as u32 * ROW_HEIGHT) as f32
 }
 
 /// The text of the list: in the font of the window, which the lines of code are in too, as a list of this many is read at a glance.
@@ -219,10 +227,14 @@ fn entry_row(
         UsageEntry::Place(row) => {
             // A handle to the row inside the list that is shared: nothing of it is copied.
             let index = row.index;
-            let row = entries.clone().project(move |entries| match &entries[index] {
-                UsageEntry::Place(row) => row,
-                UsageEntry::More(_) => unreachable!("the index was taken from a place of this list, which is not changed"),
-            });
+            let row = entries
+                .clone()
+                .project(move |entries| match &entries[index] {
+                    UsageEntry::Place(row) => row,
+                    UsageEntry::More(_) => unreachable!(
+                        "the index was taken from a place of this list, which is not changed"
+                    ),
+                });
             UsageRowView::new(row, *theme, store.clone(), Rc::clone(usages)).boxed()
         }
         UsageEntry::More(omitted) => Container::new()
@@ -264,8 +276,14 @@ mod tests {
                 entries.push(UsageEntry::Place(UsageRow {
                     place: Place {
                         path: PathBuf::from(format!("/p/{index}.rs")),
-                        at: Position { line: line as u32, character: 0 },
-                        end: Position { line: line as u32, character: 1 },
+                        at: Position {
+                            line: line as u32,
+                            character: 0,
+                        },
+                        end: Position {
+                            line: line as u32,
+                            character: 1,
+                        },
                     },
                     index: entries.len(),
                     file: ShareRef::from(format!("{index}.rs")),
@@ -280,18 +298,35 @@ mod tests {
             entries.push(UsageEntry::More(omitted));
         }
         UsageList {
-            heading: Heading { kind: None, name: "t".into(), definition: "t.rs".into(), noun: "usages", count: 1 },
+            heading: Heading {
+                kind: None,
+                name: "t".into(),
+                definition: "t.rs".into(),
+                noun: "usages",
+                count: 1,
+            },
             entries: Shared::<[UsageEntry]>::from(entries.into_boxed_slice()).into_share_ref(),
             omitted,
-            spot: FieldSpot { x: 0.0, y: 0.0, width: 0.0, height: 0.0, extent: None },
+            spot: FieldSpot {
+                x: 0.0,
+                y: 0.0,
+                width: 0.0,
+                height: 0.0,
+                extent: None,
+            },
         }
     }
 
     #[test]
-    fn the_height_of_the_card_is_its_heading_its_padding_each_place_and_a_note_when_some_are_left_out() {
+    fn the_height_of_the_card_is_its_heading_its_padding_each_place_and_a_note_when_some_are_left_out()
+     {
         let frame = LINES + (HEADING_HEIGHT + 2 * BODY_PADDING) as f32;
         assert_eq!(natural_height(&list(&[], 0)), frame);
-        assert_eq!(natural_height(&list(&[3, 1], 0)), frame + (4 * ROW_HEIGHT) as f32, "a row for each place, in whichever file");
+        assert_eq!(
+            natural_height(&list(&[3, 1], 0)),
+            frame + (4 * ROW_HEIGHT) as f32,
+            "a row for each place, in whichever file"
+        );
         assert_eq!(
             natural_height(&list(&[1], 40)) - natural_height(&list(&[1], 0)),
             NOTE_HEIGHT as f32,
@@ -301,34 +336,51 @@ mod tests {
 
     #[test]
     fn a_list_of_more_than_the_card_may_hold_is_scrolled() {
-        let rows_that_fit = ((MAX_HEIGHT - LINES) as u32 - HEADING_HEIGHT - 2 * BODY_PADDING) / ROW_HEIGHT;
+        let rows_that_fit =
+            ((MAX_HEIGHT - LINES) as u32 - HEADING_HEIGHT - 2 * BODY_PADDING) / ROW_HEIGHT;
         assert!(natural_height(&list(&[rows_that_fit as usize], 0)) <= MAX_HEIGHT);
         assert!(natural_height(&list(&[rows_that_fit as usize + 1], 0)) > MAX_HEIGHT);
     }
 
     #[test]
-    fn a_row_that_is_chosen_out_of_view_is_scrolled_into_it_and_one_in_view_leaves_the_list_where_it_is() {
+    fn a_row_that_is_chosen_out_of_view_is_scrolled_into_it_and_one_in_view_leaves_the_list_where_it_is()
+     {
         let row = ROW_HEIGHT as f32;
         let pad = BODY_PADDING as f32;
         // The first rows are in view at the top, and nothing moves for them.
         assert_eq!(reveal_offset(0, 0.0, VIEWPORT, row), None);
         let rows_in_view = ((VIEWPORT - 2.0 * pad) / row) as usize;
-        assert_eq!(reveal_offset(rows_in_view - 1, 0.0, VIEWPORT, row), None, "the last that fits");
+        assert_eq!(
+            reveal_offset(rows_in_view - 1, 0.0, VIEWPORT, row),
+            None,
+            "the last that fits"
+        );
         // The next one is below what is shown: the list moves up by as much as brings its bottom to the bottom of the view.
         let below = reveal_offset(rows_in_view, 0.0, VIEWPORT, row).expect("below the view");
         assert!(below > 0.0 && below <= row + pad, "by about a row: {below}");
         let bottom_of_row = pad + rows_in_view as f32 * row + row + pad;
-        assert_eq!(below + VIEWPORT, bottom_of_row, "so that the row ends where the view ends");
+        assert_eq!(
+            below + VIEWPORT,
+            bottom_of_row,
+            "so that the row ends where the view ends"
+        );
         // Once there, it is in view, and so are the rows above it down to the first one that is.
         assert_eq!(reveal_offset(rows_in_view, below, VIEWPORT, row), None);
         // A row above the top of what is shown brings the list back down to it, and the first row to the very top.
         let above = reveal_offset(0, 100.0, VIEWPORT, row).expect("above the view");
         assert_eq!(above, 0.0, "the first row is at the top, with its padding");
-        assert_eq!(reveal_offset(5, 400.0, VIEWPORT, row), Some(5.0 * row), "a row above the view is at its top");
+        assert_eq!(
+            reveal_offset(5, 400.0, VIEWPORT, row),
+            Some(5.0 * row),
+            "a row above the view is at its top"
+        );
         // Rows that are a little taller than asked, as a long list measures them, bring the last row to the end of the list and not a
         // few rows short of it.
         let measured = 20.32;
         let last = reveal_offset(285, 0.0, VIEWPORT, measured).expect("far below");
-        assert!((last - (285.0 * measured + measured + 2.0 * pad - VIEWPORT)).abs() < 0.01, "{last}");
+        assert!(
+            (last - (285.0 * measured + measured + 2.0 * pad - VIEWPORT)).abs() < 0.01,
+            "{last}"
+        );
     }
 }

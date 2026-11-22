@@ -2,7 +2,10 @@ use super::search_popup::SearchPopup;
 use crate::search::Search;
 use crate::workspace::Workspace;
 use aimer::shortcut::ChordMods;
-use aimer::{AnyWidget, BuildContext, ChildBuilder, ProviderHandle, Shortcuts, Stack, State, StateView, StatefulWidget, Widget, ZeroSizedBox};
+use aimer::{
+    AnyWidget, BuildContext, ChildBuilder, ProviderHandle, Shortcuts, Stack, State, StateView,
+    StatefulWidget, Widget, ZeroSizedBox,
+};
 use std::rc::Rc;
 
 /// Puts the search over its child: pressing `Shift` twice opens it, and what it needs is made then and not before, so a window
@@ -16,7 +19,9 @@ pub struct SearchLayer {
 
 impl SearchLayer {
     pub fn new(child: impl Widget + 'static) -> Self {
-        Self { child: ChildBuilder::from_widget(child) }
+        Self {
+            child: ChildBuilder::from_widget(child),
+        }
     }
 }
 
@@ -28,7 +33,10 @@ struct SearchLayerState {
 
 impl State<SearchLayer> for SearchLayerState {
     fn create(widget: SearchLayer) -> Self {
-        Self { child: widget.child, search: None }
+        Self {
+            child: widget.child,
+            search: None,
+        }
     }
 
     fn adopt_config_from(&mut self, new: Self) {
@@ -53,7 +61,11 @@ impl State<SearchLayer> for SearchLayerState {
         };
         let updater = this.updater();
         let popup: AnyWidget = match &this.search {
-            Some(search) => SearchPopup::new(Rc::clone(search), Rc::new(move || updater.set_state(|state| state.search = None))).boxed(),
+            Some(search) => SearchPopup::new(
+                Rc::clone(search),
+                Rc::new(move || updater.set_state(|state| state.search = None)),
+            )
+            .boxed(),
             None => ZeroSizedBox.boxed(),
         };
         let watched = this.search.clone();
@@ -65,6 +77,10 @@ impl State<SearchLayer> for SearchLayerState {
                     search.set_shift(held.contains(ChordMods::SHIFT));
                 }
             })
-            .child(Stack::new().add_child(AnyWidget::from(this.child.clone().boxed())).add_child(popup))
+            .child(
+                Stack::new()
+                    .add_child(AnyWidget::from(this.child.clone().boxed()))
+                    .add_child(popup),
+            )
     }
 }

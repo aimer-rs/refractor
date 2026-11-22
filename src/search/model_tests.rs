@@ -9,11 +9,18 @@ use crate::search::scratch::Scratch;
 
 /// A server that is not there, which answers at once that it cannot say.
 fn no_server(root: PathBuf) -> Lsp {
-    Lsp::with_starter(root, Box::new(|_| Err(std::io::Error::other("no server"))), true)
+    Lsp::with_starter(
+        root,
+        Box::new(|_| Err(std::io::Error::other("no server"))),
+        true,
+    )
 }
 
 fn search(dir: &Scratch) -> Rc<Search> {
-    Search::new(dir.path().to_path_buf(), no_server(dir.path().to_path_buf()))
+    Search::new(
+        dir.path().to_path_buf(),
+        no_server(dir.path().to_path_buf()),
+    )
 }
 
 fn project() -> Scratch {
@@ -25,7 +32,11 @@ fn project() -> Scratch {
 }
 
 fn titles(search: &Search) -> Vec<String> {
-    search.hits().iter().map(|hit| hit.title.clone()).collect()
+    search
+        .hits()
+        .iter()
+        .map(|hit| hit.title.clone())
+        .collect()
 }
 
 #[test]
@@ -91,7 +102,10 @@ fn the_all_tab_has_files_actions_and_text_and_each_tab_changes_the_list() {
     let search = search(&dir);
     search.set_query("req");
     let all = search.hits();
-    assert!(all.iter().any(|hit| hit.kind == Kind::File && hit.title == "request.rs"));
+    assert!(
+        all.iter()
+            .any(|hit| hit.kind == Kind::File && hit.title == "request.rs")
+    );
     search.set_tab(Tab::Actions);
     assert!(search.hits().is_empty());
     search.set_query("setti");
@@ -127,7 +141,10 @@ fn a_server_that_cannot_say_is_said_for_the_tabs_of_definitions_only() {
     search.set_tab(Tab::Types);
     assert_eq!(search.note(), None, "nothing was asked yet");
     search.set_query("req");
-    assert_eq!(search.note(), Some("The language server is not running: open a Rust file to start it"));
+    assert_eq!(
+        search.note(),
+        Some("The language server is not running: open a Rust file to start it")
+    );
     assert!(!search.busy(), "it was told at once");
     search.set_tab(Tab::Files);
     assert_eq!(search.note(), None);
@@ -150,7 +167,11 @@ fn the_redraw_is_called_when_the_list_or_the_choice_changes() {
     assert!(calls.get() > after_tab);
     let before = calls.get();
     search.set_query("req");
-    assert_eq!(calls.get(), before, "the same query is not looked for again");
+    assert_eq!(
+        calls.get(),
+        before,
+        "the same query is not looked for again"
+    );
     search.set_shift(true);
     search.set_shift(true);
     assert_eq!(calls.get(), before + 1, "only a change is a change");
@@ -164,11 +185,46 @@ fn the_preview_is_of_the_chosen_hit_and_is_read_again_when_the_choice_moves() {
     search.set_query("needle");
     let first = search.preview().expect("a file to show");
     assert!(first.path.ends_with("README.md"));
-    assert!(Rc::ptr_eq(&first, &search.preview().expect("kept")), "read once for the same hit");
+    assert!(
+        Rc::ptr_eq(&first, &search.preview().expect("kept")),
+        "read once for the same hit"
+    );
     search.move_selection(1);
     let second = search.preview().expect("another file");
     assert!(second.path.ends_with("request.rs"));
     assert_eq!(second.focus, Some(2));
     search.set_tab(Tab::Actions);
     assert_eq!(search.preview(), None, "no hit, no preview");
+}
+
+#[test]
+fn symbols_defined_outside_the_folder_are_left_out() {
+    use crate::lsp::{Place, Position, Symbol, SymbolKind};
+    let at = Position {
+        line: 0,
+        character: 0,
+    };
+    let symbol = |path: &str| Symbol {
+        name: "Request".to_owned(),
+        kind: SymbolKind::Struct,
+        container: None,
+        place: Place {
+            path: PathBuf::from(path),
+            at,
+            end: at,
+        },
+    };
+    let kept = Search::inside(
+        std::path::Path::new("/p"),
+        vec![
+            symbol("/p/src/lib.rs"),
+            symbol("/home/u/.cargo/registry/src/x/lib.rs"),
+            symbol("/pp/lib.rs"),
+        ],
+    );
+    let paths: Vec<_> = kept
+        .iter()
+        .map(|symbol| symbol.place.path.clone())
+        .collect();
+    assert_eq!(paths, [PathBuf::from("/p/src/lib.rs")]);
 }

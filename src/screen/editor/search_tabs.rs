@@ -3,7 +3,10 @@ use crate::search::Tab;
 use crate::theme::CodeTheme;
 use aimer::input::button::Button;
 use aimer::style::{FontWeight, LayoutSpacing, Theme};
-use aimer::{BoxAlignment, BuildContext, Color, Column, Container, Row, SizedBox, StatelessWidget, Text, Widget};
+use aimer::{
+    BoxAlignment, BuildContext, Color, Column, Container, Row, SizedBox, StatelessWidget, Text,
+    Widget,
+};
 use std::rc::Rc;
 
 /// How tall the strip of tabs is, and the line under the one that is shown.
@@ -29,27 +32,53 @@ impl StatelessWidget for SearchTabs {
         let theme = *CodeTheme::of(ctx);
         let tabs = Tab::ALL.map(|tab| {
             let (active, pick) = (self.active == tab, Rc::clone(&self.pick));
-            Button::new().no_decor().on_press(move || pick(tab)).build(move |state| {
-                let color = if active || state.is_hovered { theme.text } else { theme.muted };
-                let weight = if active { FontWeight::Bold } else { FontWeight::Normal };
-                SizedBox::new().height(HEIGHT).box_child(
-                    Column::new().children([
-                        Container::new()
-                            .height(HEIGHT - LINE)
-                            .padding(LayoutSpacing::new().left(10).right(10).top(7))
-                            .child(Text::new(tab.title()).text_style(fonts::ui().font_size(13).font_weight(weight).color(color)))
-                            .boxed(),
-                        Container::new()
-                            .height(LINE)
-                            .color(if active { theme.marker } else { Color::Transparent })
-                            .child(SizedBox::new().height(LINE))
-                            .boxed(),
-                    ]),
-                )
-            })
+            Button::new()
+                .no_decor()
+                .on_press(move || pick(tab))
+                .build(move |state| {
+                    let color = if active || state.is_hovered {
+                        theme.text
+                    } else {
+                        theme.muted
+                    };
+                    let weight = if active {
+                        FontWeight::Bold
+                    } else {
+                        FontWeight::Normal
+                    };
+                    SizedBox::new().height(HEIGHT).box_child(
+                        Column::new().children([
+                            Container::new()
+                                .height(HEIGHT - LINE)
+                                .padding(LayoutSpacing::new().left(10).right(10).top(7))
+                                .child(
+                                    Text::new(tab.title()).text_style(
+                                        fonts::ui()
+                                            .font_size(13)
+                                            .font_weight(weight)
+                                            .color(color),
+                                    ),
+                                )
+                                .boxed(),
+                            Container::new()
+                                .height(LINE)
+                                .color(if active {
+                                    theme.marker
+                                } else {
+                                    Color::Transparent
+                                })
+                                .child(SizedBox::new().height(LINE))
+                                .boxed(),
+                        ]),
+                    )
+                })
         });
         Container::new()
             .padding(LayoutSpacing::new().left(6).right(6))
-            .child(Row::new().vertical_alignment(BoxAlignment::Center).children(tabs))
+            .child(
+                Row::new()
+                    .vertical_alignment(BoxAlignment::Center)
+                    .children(tabs),
+            )
     }
 }

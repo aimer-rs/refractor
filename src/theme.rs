@@ -76,7 +76,7 @@ impl CodeTheme {
             muted: Color::Rgb(160, 0, 99),
             accent: Color::Rgb(84, 205, 236),
             marker: Color::Rgb(255, 92, 150),
-            selected: Color::Rgb(72, 34, 55),
+            selected: Color::Rgb(150, 0, 75),
             hover: Color::Rgb(255, 255, 255).with_alpha(0.06),
             code: Color::Rgb(236, 235, 242),
             line_number: Color::Rgb(98, 96, 118),
@@ -152,18 +152,27 @@ mod tests {
         for (name, theme) in [("dark", CodeTheme::dark()), ("light", CodeTheme::light())] {
             for color in [theme.link, theme.link_hover] {
                 let (red, green, blue, _) = color.to_rgba();
-                assert!(red > green && red > blue && blue > green, "{name}: pink is red with some blue and little green");
+                assert!(
+                    red > green && red > blue && blue > green,
+                    "{name}: pink is red with some blue and little green"
+                );
             }
             assert_ne!(theme.link, theme.link_hover, "{name}");
         }
         let dark = CodeTheme::dark();
-        assert!(luma(dark.link_hover) > luma(dark.link) + 20.0, "on the dark page, brighter is lighter");
+        assert!(
+            luma(dark.link_hover) > luma(dark.link) + 20.0,
+            "on the dark page, brighter is lighter"
+        );
         let light = CodeTheme::light();
         let saturation = |color: Color| {
             let (red, green, blue, _) = color.to_rgba();
             f32::from(red.max(green).max(blue) - red.min(green).min(blue))
         };
-        assert!(saturation(light.link_hover) > saturation(light.link), "on the white page, brighter is more vivid");
+        assert!(
+            saturation(light.link_hover) > saturation(light.link),
+            "on the white page, brighter is more vivid"
+        );
     }
 
     #[test]
@@ -184,15 +193,28 @@ mod tests {
     }
 
     #[test]
-    fn the_lines_under_problems_are_red_for_an_error_yellow_for_a_warning_and_quiet_for_a_weak_one_in_both_modes() {
+    fn the_lines_under_problems_are_red_for_an_error_yellow_for_a_warning_and_quiet_for_a_weak_one_in_both_modes()
+     {
         for (name, theme) in [("dark", CodeTheme::dark()), ("light", CodeTheme::light())] {
             let (red, green, blue, _) = theme.error_line.to_rgba();
-            assert!(red > green + 80 && red > blue + 80, "{name}: red is red: {:?}", theme.error_line);
+            assert!(
+                red > green + 80 && red > blue + 80,
+                "{name}: red is red: {:?}",
+                theme.error_line
+            );
             let (red, green, blue, _) = theme.warning_line.to_rgba();
-            assert!(red > blue + 100 && green > blue + 80, "{name}: yellow is red and green and no blue: {:?}", theme.warning_line);
+            assert!(
+                red > blue + 100 && green > blue + 80,
+                "{name}: yellow is red and green and no blue: {:?}",
+                theme.warning_line
+            );
             let (red, green, blue, _) = theme.weak_line.to_rgba();
             let spread = i32::from(red.max(green).max(blue)) - i32::from(red.min(green).min(blue));
-            assert!(spread < 90, "{name}: a weak warning is quiet, and not a color to be taken for the others: {:?}", theme.weak_line);
+            assert!(
+                spread < 90,
+                "{name}: a weak warning is quiet, and not a color to be taken for the others: {:?}",
+                theme.weak_line
+            );
             assert_ne!(theme.weak_line, theme.error_line);
             assert_ne!(theme.weak_line, theme.warning_line);
         }
@@ -213,7 +235,10 @@ mod tests {
         assert!(luma(dark.hint_text) > luma(dark.editor) + 100.0, "dark");
         assert!(luma(light.editor) > luma(light.hint_text) + 100.0, "light");
         for theme in [dark, light] {
-            assert!(theme.hint_background.to_rgba().3 < 255, "a pill lets the page through, so it is a tint and not a block");
+            assert!(
+                theme.hint_background.to_rgba().3 < 255,
+                "a pill lets the page through, so it is a tint and not a block"
+            );
         }
     }
 }

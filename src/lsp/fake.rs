@@ -73,27 +73,41 @@ impl Fake {
     /// Says `result` to the request `id`, as the server does.
     pub(crate) fn answer(&self, id: i64, result: Value) {
         self.mailbox
-            .push(Event::Message(Incoming::Response { id, result: Ok(result) }));
+            .push(Event::Message(Incoming::Response {
+                id,
+                result: Ok(result),
+            }));
     }
 
     /// Says a notification of the server's, as it does to a client.
     pub(crate) fn notify(&self, method: &str, params: Value) {
         self.mailbox
-            .push(Event::Message(Incoming::Notification { method: method.to_owned(), params }));
+            .push(Event::Message(Incoming::Notification {
+                method: method.to_owned(),
+                params,
+            }));
     }
 
     /// Says a request of the server's, as it does to a client: `method` with `params`, to be answered.
     pub(crate) fn request(&self, id: Value, method: &str, params: Value) {
         self.mailbox
-            .push(Event::Message(Incoming::Request { id, method: method.to_owned(), params }));
+            .push(Event::Message(Incoming::Request {
+                id,
+                method: method.to_owned(),
+                params,
+            }));
     }
 
     /// Says that the request `id` failed.
     pub(crate) fn fail(&self, id: i64) {
-        self.mailbox.push(Event::Message(Incoming::Response {
-            id,
-            result: Err(transport::ResponseError { code: -32801, message: "content modified".into() }),
-        }));
+        self.mailbox
+            .push(Event::Message(Incoming::Response {
+                id,
+                result: Err(transport::ResponseError {
+                    code: -32801,
+                    message: "content modified".into(),
+                }),
+            }));
     }
 }
 

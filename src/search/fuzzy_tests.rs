@@ -5,7 +5,10 @@ fn matched(query: &str, name: &str) -> Match {
 }
 
 fn text_of(name: &str, m: &Match) -> Vec<String> {
-    m.ranges.iter().map(|r| name[r.clone()].to_owned()).collect()
+    m.ranges
+        .iter()
+        .map(|r| name[r.clone()].to_owned())
+        .collect()
 }
 
 #[test]

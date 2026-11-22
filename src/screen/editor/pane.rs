@@ -1,36 +1,40 @@
 use super::completion_caret::CompletionCaret;
+use super::context_menu::EditorMenu;
 use super::definition::{find_definition, is_the_name_itself};
 use super::hover_card::HoverCard;
+use super::rename_card::RenameCard;
 use super::usages_card::UsagesCard;
 use crate::auto_indent::AutoIndent;
 use crate::auto_pair::AutoPair;
-use crate::line_comment::LineComment;
 use crate::completion::Completer;
 use crate::components::marker::tinted;
 use crate::components::popup::Popup;
 use crate::document::{Document, Language};
 use crate::fonts;
 use crate::hints::{HintColors, Hints};
-use crate::problem_lines::{LineColors, ProblemLines};
 use crate::hover::{self, HoverCell};
-use crate::semantic::Semantic;
 use crate::indent_guides::{Block, GuideStyle, IndentGuides};
+use crate::line_comment::LineComment;
+use crate::problem_lines::{LineColors, ProblemLines};
+use crate::rename::RenamePrompt;
 use crate::screen::editor::breadcrumb::Breadcrumb;
+use crate::semantic::Semantic;
 use crate::settings::{Settings, ThemeMode};
 use crate::syntax::{SyntaxHighlighter, SyntaxPalette};
 use crate::theme::CodeTheme;
 use crate::usages::{LinkColors, Taken, Usages};
 use crate::workspace::{Workspace, notifier};
 use aimer::events::element::NamedKey;
-use aimer::input::input::{FieldSpot, TextSnapshot};
 use aimer::input::input::{
     CaretMark, CaretMarks, GutterMarker, GutterMarkers, LineBar, LineBars, LineLabels,
     LineNumberAlign, LineNumbers, TextHover,
 };
+use aimer::input::input::{FieldSpot, HoverSpot, TextSnapshot};
 use aimer::input::{ControllerListener, TextArea, TextEditingController};
 use aimer::style::{LayoutSpacing, TextStyle, Theme};
 use aimer::{
-    BuildContext, Color, Container, Icons, Key, NumberExt, ProviderContext, ProviderHandle, Shortcuts, Stack, State, StateUpdater, StateView, StatefulWidget, Widget,
+    BuildContext, Color, Container, Icons, Key, NumberExt, ProviderContext, ProviderHandle,
+    Shortcuts, Stack, State, StateUpdater, StateView, StatefulWidget, Widget,
 };
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -98,6 +102,8 @@ struct EditorPaneState {
     semantic: Rc<Semantic>,
     /// The lines under what the server says is wrong. Made with the pane too.
     problem_lines: Rc<ProblemLines>,
+    /// The question that a rename asks, which is over the text while it is open. Made with the pane too.
+    rename: Rc<RenamePrompt>,
 }
 
 impl State<EditorPane> for EditorPaneState {
@@ -122,6 +128,7 @@ impl State<EditorPane> for EditorPaneState {
             hints: Rc::default(),
             semantic: Rc::default(),
             problem_lines: Rc::default(),
+            rename: Rc::default(),
         }
     }
 
@@ -155,15 +162,25 @@ impl State<EditorPane> for EditorPaneState {
             // The pane is built again when the counts come, as what the area draws is made by the build, and the text is
             // asked about again a moment after it stops changing.
             let rebuild = updater.clone();
-            self.usages.on_labels_change(Popup::redraw_watcher(rebuild, |state| state.toggles += 1));
+            self.usages
+                .on_labels_change(Popup::redraw_watcher(rebuild, |state| state.toggles += 1));
             // The same for the notes in the lines: the pane is built again when they come, and they are asked for again as the counts are.
-            self.hints.on_change(Popup::redraw_watcher(updater.clone(), |state| state.toggles += 1));
+            self.hints
+                .on_change(Popup::redraw_watcher(updater.clone(), |state| {
+                    state.toggles += 1
+                }));
             let hints = Rc::clone(&self.hints);
             // And for the colors of the names: the pane is built again, so that the highlight is made again, when they come.
-            self.semantic.on_change(Popup::redraw_watcher(updater.clone(), |state| state.toggles += 1));
+            self.semantic
+                .on_change(Popup::redraw_watcher(updater.clone(), |state| {
+                    state.toggles += 1
+                }));
             let semantic = Rc::clone(&self.semantic);
             // And for the lines under the problems: the pane is built again, which draws them, when what the server says changes.
-            self.problem_lines.on_change(Popup::redraw_watcher(updater.clone(), |state| state.toggles += 1));
+            self.problem_lines
+                .on_change(Popup::redraw_watcher(updater.clone(), |state| {
+                    state.toggles += 1
+                }));
             let (usages, watched) = (Rc::clone(&self.usages), self.document.controller.clone());
             let last = RefCell::new(watched.value());
             self.usages_listener = Some(watched.clone().listen(move |_| {
@@ -180,6 +197,12 @@ impl State<EditorPane> for EditorPaneState {
             self.usages.schedule(Usages::SHOWN_DELAY);
             self.hints.schedule(Hints::SHOWN_DELAY);
             self.semantic.schedule(Semantic::SHOWN_DELAY);
+        } else if self.document.is_cargo_manifest() {
+            // The lines under what the schema finds wrong: the pane is built again, which draws them, when they change.
+            self.problem_lines
+                .on_change(Popup::redraw_watcher(updater.clone(), |state| {
+                    state.toggles += 1
+                }));
         }
         // Closures made by the first build hold this cell, which is empty until now.
         *self.updater.borrow_mut() = Some(updater);
@@ -266,11 +289,18 @@ impl State<EditorPane> for EditorPaneState {
                 (syntax.clone(), controller, Rc::clone(&this.snapshots));
             let completer = Rc::clone(&this.completer);
             // The list of who uses a name takes the arrows, Return and Escape while it is open, and goes to the place that Return chooses.
-            let (list_keys, list_store) = (Rc::clone(&this.usages), ProviderHandle::<Workspace>::of(ctx));
+            let (list_keys, list_store) = (
+                Rc::clone(&this.usages),
+                ProviderHandle::<Workspace>::of(ctx),
+            );
             let fix_card = Rc::clone(&this.hover);
             area = area.on_key(move |key, modifiers| {
                 // With a card open for a problem, Alt+Shift+Return does its first fix and Alt+Return lists the others.
-                if modifiers.alt && !modifiers.ctrl && !modifiers.meta && matches!(key, NamedKey::Enter) {
+                if modifiers.alt
+                    && !modifiers.ctrl
+                    && !modifiers.meta
+                    && matches!(key, NamedKey::Enter)
+                {
                     if modifiers.shift {
                         if let Some(fix) = fix_card.first_fix() {
                             fix_card.hide();
@@ -343,13 +373,15 @@ impl State<EditorPane> for EditorPaneState {
             }
             // What the grammar colors, with the names that the server knows more of drawn over it, once it has said which they are.
             let layer = Rc::clone(&this.semantic);
-            area = area.highlighter(syntax.highlighter_over(move |runs, text, range| layer.overlay(runs, text, range)));
+            area = area.highlighter(
+                syntax.highlighter_over(move |runs, text, range| layer.overlay(runs, text, range)),
+            );
             // The caret carries the menu, so the menu is wherever the word is being typed.
             let menu = Rc::clone(this.completer.menu());
             area = area
                 .caret(move |context| CompletionCaret::new(context, Rc::clone(&menu), theme.code));
             area = area.gutter_markers(doc_markers(&this, theme));
-        
+
             // Return in a doc comment goes on with `///`: in a rendered block the marker is out of
             // sight, and a plain new line would end the comment without anyone seeing it.
             // Anywhere else a new line is as deep as the one before it, and a level deeper in a block.
@@ -405,27 +437,30 @@ impl State<EditorPane> for EditorPaneState {
                 Rc::clone(&this.usages),
                 this.document.controller.clone(),
             );
-            let usages_or_definition: Rc<dyn Fn(usize, FieldSpot)> = Rc::new(move |offset, spot| {
-                let lsp = force_store.read().lsp();
-                let (store, usages, path, text) = (
-                    force_store.clone(),
-                    Rc::clone(&force_usages),
-                    force_path.clone(),
-                    force_controller.snapshot(),
-                );
-                let asked = lsp.clone();
-                find_definition(&lsp, &force_path, offset, move |place| {
-                    if let Some(start) = is_the_name_itself(&asked, &text, &path, offset, &place)
-                        && usages.show_usages_at(start, spot)
-                    {
-                        return;
-                    }
-                    let notify = notifier(&store);
-                    store.update(|space| {
-                        let _ = space.go_to_place(&place, notify);
+            let usages_or_definition: Rc<dyn Fn(usize, FieldSpot)> =
+                Rc::new(move |offset, spot| {
+                    let lsp = force_store.read().lsp();
+                    let (store, usages, path, text) = (
+                        force_store.clone(),
+                        Rc::clone(&force_usages),
+                        force_path.clone(),
+                        force_controller.snapshot(),
+                    );
+                    let asked = lsp.clone();
+                    find_definition(&lsp, &force_path, offset, move |place| {
+                        if let Some(start) =
+                            is_the_name_itself(&asked, &text, &path, offset, &place)
+                            && usages.show_usages_at(start, spot)
+                        {
+                            return;
+                        }
+                        let notify = notifier(&store);
+                        store.update(|space| {
+                            let _ = space.go_to_place(&place, notify);
+                        });
                     });
                 });
-            });
+            let menu_go = Rc::clone(&usages_or_definition);
             let on_command = Rc::clone(&usages_or_definition);
             area = area.on_command_click_at(move |offset, spot| on_command(offset, spot));
             area = area.on_force_click_at(move |offset, spot| usages_or_definition(offset, spot));
@@ -438,6 +473,7 @@ impl State<EditorPane> for EditorPaneState {
                     Rc::clone(&this.snapshots),
                 );
                 let named = syntax.clone();
+                let menu_syntax = syntax.clone();
                 let (named_controller, named_snapshots) =
                     (controller.clone(), Rc::clone(&snapshots));
                 // A click on a link of a rendered doc comment, ``[`Name`]``, goes to what the name is of, as a click on the name
@@ -463,6 +499,7 @@ impl State<EditorPane> for EditorPaneState {
                     hover_path,
                     this.document.controller.clone(),
                 ));
+                let menu_source = Rc::clone(&source);
                 let asking = Rc::clone(&source);
                 let follow = hover::follow_with(
                     Rc::clone(&this.hover),
@@ -473,8 +510,11 @@ impl State<EditorPane> for EditorPaneState {
                     },
                 );
                 // A problem is what is rested on where there is one, and not the name: the card is for the whole of what is under the line.
-                let (problem_lines, line_controller, line_snapshots) =
-                    (Rc::clone(&this.problem_lines), this.document.controller.clone(), Rc::clone(&this.snapshots));
+                let (problem_lines, line_controller, line_snapshots) = (
+                    Rc::clone(&this.problem_lines),
+                    this.document.controller.clone(),
+                    Rc::clone(&this.snapshots),
+                );
                 // The card is let stay a moment when the pointer leaves the name, to be got to; a press, a key or a wheel in the text is
                 // not on its way anywhere, and takes it at once.
                 area = area.on_hover(
@@ -485,7 +525,8 @@ impl State<EditorPane> for EditorPaneState {
                                 // as all of them.
                                 let text = line_snapshots.of(&line_controller);
                                 let line = text.line_range(text.byte_to_line(byte));
-                                let range = found.range.start.max(line.start)..found.range.end.min(line.end);
+                                let range = found.range.start.max(line.start)
+                                    ..found.range.end.min(line.end);
                                 if range.start <= byte && byte < range.end {
                                     return Some(range);
                                 }
@@ -497,6 +538,23 @@ impl State<EditorPane> for EditorPaneState {
                             shut.close();
                         }),
                 );
+                // The right click adds to the clipboard verbs what is about the name it is on: the actions of a problem, the usages, going to where
+                // the name is defined, and renaming it.
+                let menu = Rc::new(EditorMenu {
+                    theme,
+                    syntax: menu_syntax,
+                    controller: this.document.controller.clone(),
+                    problems: Rc::clone(&this.problem_lines),
+                    hover: Rc::clone(&this.hover),
+                    source: menu_source,
+                    usages: Rc::clone(&this.usages),
+                    prompt: Rc::clone(&this.rename),
+                    go: menu_go,
+                });
+
+                area = area
+                    .context_menu_items(move |request| menu.extras(request))
+                    .context_menu_style(super::context_menu::style(theme));
             }
             // The count of who uses a name, after the line it is defined on, which the server finds and says when it is ready.
             let (root, lsp) = {
@@ -509,7 +567,10 @@ impl State<EditorPane> for EditorPaneState {
                 this.document.path.clone(),
                 root,
                 this.document.controller.clone(),
-                LinkColors { rest: theme.link, hover: theme.link_hover },
+                LinkColors {
+                    rest: theme.link,
+                    hover: theme.link_hover,
+                },
                 mode,
                 {
                     let buffers = ProviderHandle::<Workspace>::of(ctx);
@@ -521,7 +582,10 @@ impl State<EditorPane> for EditorPaneState {
                 store_lsp(ctx),
                 this.document.path.clone(),
                 this.document.controller.clone(),
-                HintColors { text: theme.hint_text, pill: theme.hint_background },
+                HintColors {
+                    text: theme.hint_text,
+                    pill: theme.hint_background,
+                },
             );
             this.hints.watch_server();
             this.semantic.attach(
@@ -535,14 +599,139 @@ impl State<EditorPane> for EditorPaneState {
                 store_lsp(ctx),
                 this.document.path.clone(),
                 this.document.controller.clone(),
-                LineColors { error: theme.error_line, warning: theme.warning_line, weak: theme.weak_line },
+                LineColors {
+                    error: theme.error_line,
+                    warning: theme.warning_line,
+                    weak: theme.weak_line,
+                },
             );
             // The lines under what is wrong are drawn under the text: a line moves over what is typed, until the server says it again.
             area = area.underlines(this.problem_lines.underlines());
             // The notes of the server are drawn in the lines: what the text is typed in moves them, and the server is asked again.
             area = area.inlays(this.hints.inlays());
             let labels = Rc::clone(&this.usages);
-            area = area.line_labels(LineLabels::new(Usages::GAP, move |line| labels.label_of(line)));
+            area = area.line_labels(LineLabels::new(Usages::GAP, move |line| {
+                labels.label_of(line)
+            }));
+        }
+        if this.document.is_cargo_manifest() {
+            // A manifest has no server: the schema says what is wrong and what each key is, and the lines and the card are made of that.
+            this.problem_lines.attach_manifest(
+                this.document.path.clone(),
+                this.document.controller.clone(),
+                LineColors {
+                    error: theme.error_line,
+                    warning: theme.warning_line,
+                    weak: theme.weak_line,
+                },
+            );
+            area = area.underlines(this.problem_lines.underlines());
+            let (lines, controller, snapshots) = (
+                Rc::clone(&this.problem_lines),
+                this.document.controller.clone(),
+                Rc::clone(&this.snapshots),
+            );
+            let ask = {
+                let (lines, controller, snapshots) =
+                    (Rc::clone(&lines), controller.clone(), Rc::clone(&snapshots));
+                move |spot: HoverSpot, publish: Rc<dyn Fn(Option<hover::Card>)>| {
+                    let at = spot.range.start;
+                    let words = lines
+                        .manifest()
+                        .hover(&snapshots.of(&controller), at)
+                        .map(|hover| hover.markdown)
+                        .unwrap_or_default();
+                    let problems: Vec<hover::Problem> = lines
+                        .at(at)
+                        .into_iter()
+                        .map(|found| hover::Problem {
+                            weight: found.weight,
+                            message: found.message,
+                            code: found.code,
+                        })
+                        .collect();
+                    if words.is_empty() && problems.is_empty() {
+                        publish(None);
+                        return;
+                    }
+                    publish(Some(hover::Card {
+                        spot,
+                        markdown: words,
+                        problems,
+                        fixes: Vec::new(),
+                    }));
+                }
+            };
+            let follow = hover::follow_with(Rc::clone(&this.hover), ask, || {});
+            let dismissed = Rc::clone(&this.hover);
+            // A command click or a force click on a path, a member or a feature goes to where it is; the place is underlined as a link
+            // while the key is held.
+            let manifest_dir = this
+                .document
+                .path
+                .parent()
+                .map(std::path::Path::to_path_buf)
+                .unwrap_or_default();
+            let jump_at = {
+                let (lines, controller, snapshots) =
+                    (Rc::clone(&lines), controller.clone(), Rc::clone(&snapshots));
+                move |byte: usize| {
+                    let scan = lines
+                        .manifest()
+                        .scan(&snapshots.of(&controller))?;
+                    crate::cargo::navigate::jump_at(&scan.entries, byte, &manifest_dir)
+                }
+            };
+            let jump_at = Rc::new(jump_at);
+            let (store, path) = (
+                ProviderHandle::<Workspace>::of(ctx),
+                this.document.path.clone(),
+            );
+            let go = {
+                let jump_at = Rc::clone(&jump_at);
+                Rc::new(move |byte: usize, _spot: FieldSpot| {
+                    let Some(jump) = jump_at(byte) else {
+                        return;
+                    };
+                    let notify = notifier(&store);
+                    store.update(|space| {
+                        let _ = match &jump.target {
+                            crate::cargo::navigate::Target::File(file) => space.open(file, notify),
+                            crate::cargo::navigate::Target::Here(at) => {
+                                space.go_to_bytes(&path, *at..*at, notify)
+                            }
+                        };
+                    });
+                })
+            };
+            let on_command = Rc::clone(&go);
+            area = area
+                .link_range({
+                    let jump_at = Rc::clone(&jump_at);
+                    move |byte| jump_at(byte).map(|jump| jump.span)
+                })
+                .on_command_click_at(move |byte, spot| on_command(byte, spot))
+                .on_force_click_at(move |byte, spot| go(byte, spot));
+            area = area.on_hover(
+                TextHover::new(EditorPane::HOVER_DELAY, follow)
+                    .range_at(move |byte| {
+                        let text = snapshots.of(&controller);
+                        if let Some(found) = lines.at(byte).first() {
+                            // On the line the pointer is on: a problem on many lines has a card at each.
+                            let line = text.line_range(text.byte_to_line(byte));
+                            let range =
+                                found.range.start.max(line.start)..found.range.end.min(line.end);
+                            if range.start <= byte && byte < range.end {
+                                return Some(range);
+                            }
+                        }
+                        lines
+                            .manifest()
+                            .hover(&text, byte)
+                            .map(|hover| hover.span)
+                    })
+                    .on_dismiss(move || dismissed.hide()),
+            );
         }
         if this.document.syntax.is_none() {
             // A document that has no syntax has no menu, and its Escape is not the field's either. Tab and Shift+Tab over a selection
@@ -564,32 +753,43 @@ impl State<EditorPane> for EditorPaneState {
                 .embedder(markdown.embedder());
         }
 
-        let stack = Stack::new()
-            .add_child(area)
-            .add_child(HoverCard::new(Rc::clone(&this.hover), mode))
-            .add_child(UsagesCard::new(Rc::clone(&this.usages)));
+        let stack = || {
+            Stack::new()
+                .add_child(area)
+                .add_child(HoverCard::new(Rc::clone(&this.hover), mode))
+                .add_child(UsagesCard::new(Rc::clone(&this.usages)))
+                .add_child(RenameCard::new(
+                    Rc::clone(&this.rename),
+                    this.document.path.clone(),
+                    this.document.focus.clone(),
+                ))
+                .boxed()
+        };
+
         // Cmd+/ (Ctrl+/ elsewhere) comments the lines that are selected, or takes the comment away, where the language has one. A
         // rendered doc comment is not edited, as it is not by any other key.
         match this.document.language.line_comment() {
             Some(marker) => {
-                let (controller, guarded) = (this.document.controller.clone(), Rc::clone(&this.guarded));
+                let (controller, guarded) =
+                    (this.document.controller.clone(), Rc::clone(&this.guarded));
                 Shortcuts::new()
                     .bind_str(LineComment::SHORTCUT, move || {
                         if !guarded.get() {
                             LineComment::apply(&controller, marker);
                         }
                     })
-                    .child(stack)
-                    .boxed()
+                    .box_child(stack())
             }
-            None => stack.boxed(),
+            None => stack(),
         }
     }
 }
 
 /// The language server of the workspace.
 fn store_lsp(ctx: &BuildContext) -> crate::lsp::Lsp {
-    ProviderHandle::<Workspace>::of(ctx).read().lsp()
+    ProviderHandle::<Workspace>::of(ctx)
+        .read()
+        .lsp()
 }
 
 /// Whether the editor takes `key` before the text does: an open menu takes the arrows, Return, Tab and Escape, and

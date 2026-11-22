@@ -24,15 +24,20 @@ fn offset_of(text: &str, needle: &str) -> usize {
 }
 
 #[test]
-fn what_is_drawn_over_the_grammar_is_given_the_runs_of_the_part_and_what_it_says_is_the_highlight() {
+fn what_is_drawn_over_the_grammar_is_given_the_runs_of_the_part_and_what_it_says_is_the_highlight()
+{
     let seen = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
     let kept = std::rc::Rc::clone(&seen);
     let over = highlighter().highlighter_over(move |runs, text, range| {
-        kept.borrow_mut().push((runs.len(), text.len(), range));
+        kept.borrow_mut()
+            .push((runs.len(), text.len(), range));
         // The first run is taken away and one of ours is put in its place.
         let mut runs = runs;
         runs.remove(0);
-        runs.push(StyledRange::new(0..2, SpanStyle::new().color(aimer::Color::Rgb(1, 2, 3))));
+        runs.push(StyledRange::new(
+            0..2,
+            SpanStyle::new().color(aimer::Color::Rgb(1, 2, 3)),
+        ));
         runs
     });
     let plain = highlighter().highlighter();
@@ -41,7 +46,11 @@ fn what_is_drawn_over_the_grammar_is_given_the_runs_of_the_part_and_what_it_says
     assert_eq!(found.last().map(|run| run.range.clone()), Some(0..2));
     let seen = seen.borrow();
     assert_eq!(seen.len(), 1);
-    assert_eq!((seen[0].0, seen[0].1, seen[0].2.clone()), (expected.len(), SAMPLE.len(), 0..SAMPLE.len()), "the runs of the whole text, as the grammar made them");
+    assert_eq!(
+        (seen[0].0, seen[0].1, seen[0].2.clone()),
+        (expected.len(), SAMPLE.len(), 0..SAMPLE.len()),
+        "the runs of the whole text, as the grammar made them"
+    );
 }
 
 #[test]
@@ -884,7 +893,8 @@ fn the_pair_beside_the_caret_and_the_pair_around_it_follow_the_text_as_it_is_edi
 }
 
 #[test]
-fn a_line_of_code_that_is_shown_on_its_own_is_colored_as_it_is_in_a_file_and_leaves_the_parse_of_a_file_alone() {
+fn a_line_of_code_that_is_shown_on_its_own_is_colored_as_it_is_in_a_file_and_leaves_the_parse_of_a_file_alone()
+ {
     let palette = SyntaxPalette::dark();
     let snippets = highlighter();
     // The parse of a document, which colors for lines of other files must not disturb.
@@ -894,17 +904,46 @@ fn a_line_of_code_that_is_shown_on_its_own_is_colored_as_it_is_in_a_file_and_lea
 
     let line = "let name = Point { x: 1 };";
     let ranges = snippets.snippet(line);
-    let color_at = |needle: &str| style_at(&ranges, offset_of(line, needle)).and_then(|style| style.color);
+    let color_at =
+        |needle: &str| style_at(&ranges, offset_of(line, needle)).and_then(|style| style.color);
     assert_eq!(color_at("let"), Some(palette.keyword));
     assert_eq!(color_at("1"), Some(palette.number));
     // A fragment, which is not a whole program, and one that is not code at all, do not fail.
-    for fragment in [".child(x)", "} else {", "x: &'a str,", "\u{e9}\u{e9}", "\"unfinished"] {
+    for fragment in [
+        ".child(x)",
+        "} else {",
+        "x: &'a str,",
+        "\u{e9}\u{e9}",
+        "\"unfinished",
+    ] {
         let ranges = snippets.snippet(fragment);
         assert!(
-            ranges.iter().all(|range| range.range.end <= fragment.len() && fragment.is_char_boundary(range.range.start) && fragment.is_char_boundary(range.range.end)),
+            ranges
+                .iter()
+                .all(|range| range.range.end <= fragment.len()
+                    && fragment.is_char_boundary(range.range.start)
+                    && fragment.is_char_boundary(range.range.end)),
             "{fragment:?}: {ranges:?} are inside the text and between characters"
         );
     }
     assert!(snippets.snippet("").is_empty());
-    assert_eq!(document.ranges(&text, whole(&text)), before, "what a file is colored with is as it was");
+    assert_eq!(
+        document.ranges(&text, whole(&text)),
+        before,
+        "what a file is colored with is as it was"
+    );
+}
+
+#[test]
+fn the_tokens_of_a_toml_file_get_the_colors_of_their_kind() {
+    let text = "[package]\nname = \"a\" # the name\nversion = 1\n";
+    let snapshot = TextSnapshot::from_text(text);
+    let ranges = SyntaxHighlighter::toml(SyntaxPalette::dark()).ranges(&snapshot, whole(&snapshot));
+    for needle in ["package", "name", "\"a\"", "# the name", "1"] {
+        assert!(
+            style_at(&ranges, offset_of(text, needle)).is_some(),
+            "{needle} is colored"
+        );
+    }
+    assert!(style_at(&ranges, offset_of(text, " = ")).is_none());
 }

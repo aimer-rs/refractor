@@ -27,12 +27,31 @@ fn what_a_count_says_is_in_words_and_a_name_that_nothing_implements_says_nothing
         usages: usages.map(|count| (0..count as u32).map(place).collect()),
         implementations: implementations.map(|count| (0..count as u32).map(place).collect()),
     };
-    assert_eq!(lens(Some(27), None).usages_caption().as_deref(), Some("27 usages"));
-    assert_eq!(lens(Some(1), None).usages_caption().as_deref(), Some("1 usage"));
-    assert_eq!(lens(Some(0), None).usages_caption().as_deref(), Some("no usages"));
+    assert_eq!(
+        lens(Some(27), None).usages_caption().as_deref(),
+        Some("27 usages")
+    );
+    assert_eq!(
+        lens(Some(1), None).usages_caption().as_deref(),
+        Some("1 usage")
+    );
+    assert_eq!(
+        lens(Some(0), None).usages_caption().as_deref(),
+        Some("no usages")
+    );
     assert_eq!(lens(None, None).usages_caption(), None, "not counted");
-    assert_eq!(lens(None, Some(1)).implementations_caption().as_deref(), Some("1 implementation"));
-    assert_eq!(lens(None, Some(3)).implementations_caption().as_deref(), Some("3 implementations"));
+    assert_eq!(
+        lens(None, Some(1))
+            .implementations_caption()
+            .as_deref(),
+        Some("1 implementation")
+    );
+    assert_eq!(
+        lens(None, Some(3))
+            .implementations_caption()
+            .as_deref(),
+        Some("3 implementations")
+    );
     assert_eq!(lens(None, Some(0)).implementations_caption(), None);
     assert_eq!(lens(None, None).implementations_caption(), None);
 }
@@ -47,8 +66,16 @@ fn what_was_counted_for_a_name_is_joined_and_the_names_are_in_the_order_of_the_t
     assert_eq!(
         lenses,
         vec![
-            Lens { at: 11, usages: Some(vec![place(3), place(4)]), implementations: Some(vec![place(2)]) },
-            Lens { at: 25, usages: Some(vec![place(1)]), implementations: None },
+            Lens {
+                at: 11,
+                usages: Some(vec![place(3), place(4)]),
+                implementations: Some(vec![place(2)])
+            },
+            Lens {
+                at: 25,
+                usages: Some(vec![place(1)]),
+                implementations: None
+            },
         ]
     );
     assert!(group(Vec::new()).is_empty());
@@ -74,7 +101,11 @@ fn ready() -> (Rc<aimer::Venus>, Fake, Lsp) {
     let venus = installed();
     let fake = Fake::new();
     let lsp = lsp_with(&fake);
-    lsp.open(Path::new(FILE), &TextEditingController::with_text(TEXT), Rc::new(|| {}));
+    lsp.open(
+        Path::new(FILE),
+        &TextEditingController::with_text(TEXT),
+        Rc::new(|| {}),
+    );
     settle(&venus);
     let _ = fake.requests();
     fake.answer(1, json!({"capabilities": {"textDocumentSync": 2, "positionEncoding": "utf-8", "codeLensProvider": {"resolveProvider": true}}}));
@@ -89,7 +120,9 @@ type Given = Rc<RefCell<Vec<Option<Vec<Lens>>>>>;
 fn load(lsp: &Lsp) -> (LensLoad, Given) {
     let given: Given = Rc::default();
     let into = Rc::clone(&given);
-    let load = lsp.lenses(Path::new(FILE), move |lenses| into.borrow_mut().push(lenses));
+    let load = lsp.lenses(Path::new(FILE), move |lenses| {
+        into.borrow_mut().push(lenses)
+    });
     (load, given)
 }
 
@@ -100,22 +133,42 @@ fn the_lenses_of_a_file_are_listed_and_each_resolved_and_given_once_all_are_in()
     let told = fake.requests();
     assert_eq!(told.len(), 1);
     assert_eq!(told[0].0, "textDocument/codeLens");
-    assert_eq!(told[0].1, json!({"textDocument": {"uri": "file:///project/src/main.rs"}}));
-    let list = json!([unresolved(0, 11, "impls"), unresolved(0, 11, "references"), unresolved(1, 7, "references")]);
+    assert_eq!(
+        told[0].1,
+        json!({"textDocument": {"uri": "file:///project/src/main.rs"}})
+    );
+    let list = json!([
+        unresolved(0, 11, "impls"),
+        unresolved(0, 11, "references"),
+        unresolved(1, 7, "references")
+    ]);
     fake.answer(told[0].2.unwrap(), list.clone());
     settle(&venus);
     let resolves = fake.requests();
     assert_eq!(resolves.len(), 3, "each lens is asked for");
-    assert!(resolves.iter().all(|(method, _, _)| method == "codeLens/resolve"));
+    assert!(
+        resolves
+            .iter()
+            .all(|(method, _, _)| method == "codeLens/resolve")
+    );
     assert_eq!(resolves[0].1, list[0], "the lens is sent back as it came");
     assert!(given.borrow().is_empty(), "not before the counts are in");
 
     // Out of order, as a server may.
-    fake.answer(resolves[2].2.unwrap(), resolved(1, 7, "0 references", vec![]));
-    fake.answer(resolves[0].2.unwrap(), resolved(0, 11, "1 implementation", vec![location(1)]));
+    fake.answer(
+        resolves[2].2.unwrap(),
+        resolved(1, 7, "0 references", vec![]),
+    );
+    fake.answer(
+        resolves[0].2.unwrap(),
+        resolved(0, 11, "1 implementation", vec![location(1)]),
+    );
     settle(&venus);
     assert!(given.borrow().is_empty());
-    fake.answer(resolves[1].2.unwrap(), resolved(0, 11, "2 references", vec![location(2), location(3)]));
+    fake.answer(
+        resolves[1].2.unwrap(),
+        resolved(0, 11, "2 references", vec![location(2), location(3)]),
+    );
     settle(&venus);
 
     let given = given.borrow();
@@ -125,8 +178,15 @@ fn the_lenses_of_a_file_are_listed_and_each_resolved_and_given_once_all_are_in()
     // The name of the struct is at byte 11 and the function's at 25: the second line begins at byte 18.
     assert_eq!(lenses[0].at, 11);
     assert_eq!(lenses[0].usages_caption().as_deref(), Some("2 usages"));
-    assert_eq!(lenses[0].implementations_caption().as_deref(), Some("1 implementation"));
-    assert_eq!(lenses[0].usages.as_ref().unwrap()[1].at.line, 3, "with where they are");
+    assert_eq!(
+        lenses[0].implementations_caption().as_deref(),
+        Some("1 implementation")
+    );
+    assert_eq!(
+        lenses[0].usages.as_ref().unwrap()[1].at.line,
+        3,
+        "with where they are"
+    );
     assert_eq!(lenses[1].at, 25);
     assert_eq!(lenses[1].usages_caption().as_deref(), Some("no usages"));
     let _ = venus;
@@ -137,17 +197,26 @@ fn only_a_few_lenses_are_asked_for_at_once_and_each_answer_asks_for_the_next() {
     let (venus, fake, lsp) = ready();
     let (_load, given) = load(&lsp);
     let list_id = fake.requests()[0].2.unwrap();
-    let list: Vec<Value> = (0..10).map(|line| unresolved(line, 0, "references")).collect();
+    let list: Vec<Value> = (0..10)
+        .map(|line| unresolved(line, 0, "references"))
+        .collect();
     fake.answer(list_id, Value::Array(list));
     settle(&venus);
     let first = fake.requests();
     assert_eq!(first.len(), IN_FLIGHT, "not all ten");
     // One comes back: one more goes.
-    fake.answer(first[0].2.unwrap(), resolved(0, 0, "1 reference", vec![location(5)]));
+    fake.answer(
+        first[0].2.unwrap(),
+        resolved(0, 0, "1 reference", vec![location(5)]),
+    );
     settle(&venus);
     let next = fake.requests();
     assert_eq!(next.len(), 1);
-    assert_eq!(next[0].1["range"]["start"]["line"], json!(IN_FLIGHT), "in the order of the list");
+    assert_eq!(
+        next[0].1["range"]["start"]["line"],
+        json!(IN_FLIGHT),
+        "in the order of the list"
+    );
     assert!(given.borrow().is_empty());
     let _ = venus;
 }
@@ -157,15 +226,33 @@ fn a_load_that_is_cancelled_tells_the_server_and_gives_nothing() {
     let (venus, fake, lsp) = ready();
     let (load, given) = load(&lsp);
     let list_id = fake.requests()[0].2.unwrap();
-    fake.answer(list_id, json!([unresolved(0, 11, "references"), unresolved(1, 7, "references")]));
+    fake.answer(
+        list_id,
+        json!([
+            unresolved(0, 11, "references"),
+            unresolved(1, 7, "references")
+        ]),
+    );
     settle(&venus);
     let resolves = fake.requests();
     assert_eq!(resolves.len(), 2);
     load.cancel();
     let told = fake.requests();
-    assert_eq!(told.iter().filter(|(method, _, _)| method == "$/cancelRequest").count(), 2, "each that is waiting");
-    fake.answer(resolves[0].2.unwrap(), resolved(0, 11, "1 reference", vec![location(1)]));
-    fake.answer(resolves[1].2.unwrap(), resolved(1, 7, "1 reference", vec![location(1)]));
+    assert_eq!(
+        told.iter()
+            .filter(|(method, _, _)| method == "$/cancelRequest")
+            .count(),
+        2,
+        "each that is waiting"
+    );
+    fake.answer(
+        resolves[0].2.unwrap(),
+        resolved(0, 11, "1 reference", vec![location(1)]),
+    );
+    fake.answer(
+        resolves[1].2.unwrap(),
+        resolved(1, 7, "1 reference", vec![location(1)]),
+    );
     settle(&venus);
     assert!(given.borrow().is_empty(), "nothing is given");
     assert!(fake.requests().is_empty(), "and nothing more is asked");
@@ -191,22 +278,46 @@ fn a_list_that_could_not_be_given_is_no_lenses_and_a_lens_that_could_not_be_give
     let (_first, failed) = load(&lsp);
     fake.fail(fake.requests()[0].2.unwrap());
     settle(&venus);
-    assert_eq!(*failed.borrow(), vec![None], "the server could not say: the caller keeps what it had");
+    assert_eq!(
+        *failed.borrow(),
+        vec![None],
+        "the server could not say: the caller keeps what it had"
+    );
 
     let (_second, partial) = load(&lsp);
     let list_id = fake.requests()[0].2.unwrap();
-    fake.answer(list_id, json!([unresolved(0, 11, "references"), unresolved(1, 7, "references"), unresolved(1, 7, "impls")]));
+    fake.answer(
+        list_id,
+        json!([
+            unresolved(0, 11, "references"),
+            unresolved(1, 7, "references"),
+            unresolved(1, 7, "impls")
+        ]),
+    );
     settle(&venus);
     let resolves = fake.requests();
     fake.fail(resolves[0].2.unwrap());
     // A lens that is not one of places is none either.
-    fake.answer(resolves[1].2.unwrap(), json!({"range": {"start": {"line": 1, "character": 7}}, "command": null}));
-    fake.answer(resolves[2].2.unwrap(), resolved(1, 7, "1 implementation", vec![location(0)]));
+    fake.answer(
+        resolves[1].2.unwrap(),
+        json!({"range": {"start": {"line": 1, "character": 7}}, "command": null}),
+    );
+    fake.answer(
+        resolves[2].2.unwrap(),
+        resolved(1, 7, "1 implementation", vec![location(0)]),
+    );
     settle(&venus);
     let partial = partial.borrow();
     let lenses = partial[0].as_ref().expect("the rest are given");
     assert_eq!(lenses.len(), 1);
-    assert_eq!((lenses[0].at, lenses[0].usages.is_none(), lenses[0].implementations.is_some()), (25, true, true));
+    assert_eq!(
+        (
+            lenses[0].at,
+            lenses[0].usages.is_none(),
+            lenses[0].implementations.is_some()
+        ),
+        (25, true, true)
+    );
     let _ = venus;
 }
 
@@ -216,16 +327,32 @@ fn nothing_is_loaded_where_the_file_is_not_open_or_the_server_is_not_ready() {
     let lsp = lsp_with(&Fake::new());
     let given: Given = Rc::default();
     let into = Rc::clone(&given);
-    let _ = lsp.lenses(Path::new(FILE), move |lenses| into.borrow_mut().push(lenses));
-    assert_eq!(*given.borrow(), vec![None], "a file that is not open: at once, with none");
+    let _ = lsp.lenses(Path::new(FILE), move |lenses| {
+        into.borrow_mut().push(lenses)
+    });
+    assert_eq!(
+        *given.borrow(),
+        vec![None],
+        "a file that is not open: at once, with none"
+    );
 
     let (starting, fake) = (lsp_with(&Fake::new()), Fake::new());
     let _ = fake;
-    starting.open(Path::new(FILE), &TextEditingController::with_text(TEXT), Rc::new(|| {}));
+    starting.open(
+        Path::new(FILE),
+        &TextEditingController::with_text(TEXT),
+        Rc::new(|| {}),
+    );
     settle(&venus);
     let into = Rc::clone(&given);
-    let _ = starting.lenses(Path::new(FILE), move |lenses| into.borrow_mut().push(lenses));
-    assert_eq!(given.borrow().len(), 2, "a server that is not ready: at once, with none");
+    let _ = starting.lenses(Path::new(FILE), move |lenses| {
+        into.borrow_mut().push(lenses)
+    });
+    assert_eq!(
+        given.borrow().len(),
+        2,
+        "a server that is not ready: at once, with none"
+    );
     assert_eq!(given.borrow()[1], None);
     let _ = venus;
 }
@@ -235,7 +362,9 @@ fn a_file_with_more_lenses_than_are_wanted_has_the_first_of_them() {
     let (venus, fake, lsp) = ready();
     let (_load, given) = load(&lsp);
     let list_id = fake.requests()[0].2.unwrap();
-    let list: Vec<Value> = (0..MOST as u32 + 50).map(|line| unresolved(line, 0, "references")).collect();
+    let list: Vec<Value> = (0..MOST as u32 + 50)
+        .map(|line| unresolved(line, 0, "references"))
+        .collect();
     fake.answer(list_id, Value::Array(list));
     settle(&venus);
     // Answer what is asked for, again and again, until nothing more is.
@@ -248,11 +377,17 @@ fn a_file_with_more_lenses_than_are_wanted_has_the_first_of_them() {
         for (_, lens, id) in waiting {
             asked += 1;
             let line = lens["range"]["start"]["line"].as_u64().unwrap() as u32;
-            fake.answer(id.unwrap(), resolved(line, 0, "1 reference", vec![location(1)]));
+            fake.answer(
+                id.unwrap(),
+                resolved(line, 0, "1 reference", vec![location(1)]),
+            );
         }
         settle(&venus);
     }
-    assert_eq!(asked, MOST, "{asked} lenses were asked for, and no more than {MOST} are wanted");
+    assert_eq!(
+        asked, MOST,
+        "{asked} lenses were asked for, and no more than {MOST} are wanted"
+    );
     let given = given.borrow();
     // They all lie past the end of the two lines of the text, so what is given is few: it is that it is given once that is asked.
     assert_eq!(given.len(), 1);

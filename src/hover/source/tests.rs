@@ -5,15 +5,19 @@ use aimer::input::TextEditingController;
 use serde_json::{Value, json};
 
 use super::*;
-use crate::lsp::fake::{Fake, installed, lsp_with, settle};
 use crate::lsp::Weight;
+use crate::lsp::fake::{Fake, installed, lsp_with, settle};
 use crate::problem_lines::LineColors;
 
 const FILE: &str = "/project/src/main.rs";
 const TEXT: &str = "fn main() {\n    let x: Rc<u8> = make();\n}\n";
 
 fn colors() -> LineColors {
-    LineColors { error: aimer::Color::Rgb(1, 1, 1), warning: aimer::Color::Rgb(2, 2, 2), weak: aimer::Color::Rgb(3, 3, 3) }
+    LineColors {
+        error: aimer::Color::Rgb(1, 1, 1),
+        warning: aimer::Color::Rgb(2, 2, 2),
+        weak: aimer::Color::Rgb(3, 3, 3),
+    }
 }
 
 struct Rig {
@@ -38,7 +42,12 @@ fn rig(problem: bool) -> Rig {
     settle(&venus);
     let _ = fake.requests();
     let lines = Rc::new(ProblemLines::default());
-    lines.attach(lsp.clone(), PathBuf::from(FILE), controller.clone(), colors());
+    lines.attach(
+        lsp.clone(),
+        PathBuf::from(FILE),
+        controller.clone(),
+        colors(),
+    );
     if problem {
         fake.notify(
             "textDocument/publishDiagnostics",
@@ -48,15 +57,35 @@ fn rig(problem: bool) -> Rig {
         );
         settle(&venus);
     }
-    let source = CardSource::new(Rc::clone(&lines), Rc::new(move || lsp.clone()), PathBuf::from(FILE), controller.clone());
-    Rig { venus, fake, source, controller, lines, shown: Rc::default() }
+    let source = CardSource::new(
+        Rc::clone(&lines),
+        Rc::new(move || lsp.clone()),
+        PathBuf::from(FILE),
+        controller.clone(),
+    );
+    Rig {
+        venus,
+        fake,
+        source,
+        controller,
+        lines,
+        shown: Rc::default(),
+    }
 }
 
 impl Rig {
     fn ask(&self, at: std::ops::Range<usize>) {
-        let spot = HoverSpot { range: at, x: 0.0, y: 0.0, width: 10.0, height: 10.0, extent: None };
+        let spot = HoverSpot {
+            range: at,
+            x: 0.0,
+            y: 0.0,
+            width: 10.0,
+            height: 10.0,
+            extent: None,
+        };
         let shown = Rc::clone(&self.shown);
-        self.source.ask(spot, Rc::new(move |card| shown.borrow_mut().push(card)));
+        self.source
+            .ask(spot, Rc::new(move |card| shown.borrow_mut().push(card)));
     }
 
     fn last(&self) -> Option<Card> {
@@ -82,9 +111,16 @@ fn a_place_with_no_problem_has_the_documentation_the_server_has_and_nothing_else
     let rig = rig(false);
     rig.ask(16..19);
     let told = requests_of(&rig);
-    assert_eq!(told.len(), 1, "only the words are asked for: there is no problem to fix");
+    assert_eq!(
+        told.len(),
+        1,
+        "only the words are asked for: there is no problem to fix"
+    );
     assert_eq!(told[0].0, "textDocument/hover");
-    rig.fake.answer(told[0].2.unwrap(), json!({"contents": {"kind": "markdown", "value": "`let`"}}));
+    rig.fake.answer(
+        told[0].2.unwrap(),
+        json!({"contents": {"kind": "markdown", "value": "`let`"}}),
+    );
     settle(&rig.venus);
     let card = rig.last().expect("shown");
     assert_eq!(card.markdown, "`let`");
@@ -102,32 +138,68 @@ fn a_place_with_nothing_to_say_has_no_card() {
 }
 
 #[test]
-fn a_problem_is_shown_at_once_with_what_the_server_said_and_the_fixes_and_the_words_are_put_in_as_they_come() {
+fn a_problem_is_shown_at_once_with_what_the_server_said_and_the_fixes_and_the_words_are_put_in_as_they_come()
+ {
     let rig = rig(true);
     rig.ask(23..25);
     // At once, before the server has answered anything.
     let first = rig.last().expect("shown at once");
     assert_eq!(first.problems.len(), 1);
-    assert_eq!((first.problems[0].message.as_str(), first.problems[0].code.as_deref()), ("Cannot find type `Rc` in this scope", Some("E0412")));
+    assert_eq!(
+        (
+            first.problems[0].message.as_str(),
+            first.problems[0].code.as_deref()
+        ),
+        ("Cannot find type `Rc` in this scope", Some("E0412"))
+    );
     assert_eq!(first.problems[0].weight, Weight::Error);
     assert!(first.fixes.is_empty() && first.markdown.is_empty());
     let told = requests_of(&rig);
-    let methods: Vec<&str> = told.iter().map(|(method, ..)| method.as_str()).collect();
-    assert!(methods.contains(&"textDocument/hover") && methods.contains(&"textDocument/codeAction"), "{methods:?}");
-    let action = told.iter().find(|(method, ..)| method == "textDocument/codeAction").unwrap();
-    assert_eq!(action.1["range"], json!({"start": {"line": 1, "character": 11}, "end": {"line": 1, "character": 13}}), "the range the problem is under");
+    let methods: Vec<&str> = told
+        .iter()
+        .map(|(method, ..)| method.as_str())
+        .collect();
+    assert!(
+        methods.contains(&"textDocument/hover") && methods.contains(&"textDocument/codeAction"),
+        "{methods:?}"
+    );
+    let action = told
+        .iter()
+        .find(|(method, ..)| method == "textDocument/codeAction")
+        .unwrap();
+    assert_eq!(
+        action.1["range"],
+        json!({"start": {"line": 1, "character": 11}, "end": {"line": 1, "character": 13}}),
+        "the range the problem is under"
+    );
     // The fixes come.
     rig.fake.answer(action.2.unwrap(), import());
     settle(&rig.venus);
     let with_fixes = rig.last().unwrap();
-    assert_eq!(with_fixes.fixes.iter().map(|fix| fix.title.as_str()).collect::<Vec<_>>(), ["Import `std::rc::Rc`", "Import `std::sync::Arc`"]);
+    assert_eq!(
+        with_fixes
+            .fixes
+            .iter()
+            .map(|fix| fix.title.as_str())
+            .collect::<Vec<_>>(),
+        ["Import `std::rc::Rc`", "Import `std::sync::Arc`"]
+    );
     assert!(with_fixes.fixes[0].preferred && !with_fixes.fixes[1].preferred);
     // And the words, which are under the problem.
-    let hover = told.iter().find(|(method, ..)| method == "textDocument/hover").unwrap();
-    rig.fake.answer(hover.2.unwrap(), json!({"contents": {"kind": "markdown", "value": "docs"}}));
+    let hover = told
+        .iter()
+        .find(|(method, ..)| method == "textDocument/hover")
+        .unwrap();
+    rig.fake.answer(
+        hover.2.unwrap(),
+        json!({"contents": {"kind": "markdown", "value": "docs"}}),
+    );
     settle(&rig.venus);
     let all = rig.last().unwrap();
-    assert_eq!((all.markdown.as_str(), all.problems.len(), all.fixes.len()), ("docs", 1, 2));
+    assert_eq!(
+        (all.markdown.as_str(), all.problems.len(), all.fixes.len()),
+        ("docs", 1, 2)
+    );
     assert_eq!(all.spot.range, 23..25);
 }
 
@@ -136,7 +208,10 @@ fn the_fix_the_server_prefers_is_first_whatever_order_it_said_them_in() {
     let rig = rig(true);
     rig.ask(23..25);
     let told = requests_of(&rig);
-    let action = told.iter().find(|(method, ..)| method == "textDocument/codeAction").unwrap();
+    let action = told
+        .iter()
+        .find(|(method, ..)| method == "textDocument/codeAction")
+        .unwrap();
     let mut list = import();
     list.as_array_mut().unwrap().reverse();
     rig.fake.answer(action.2.unwrap(), list);
@@ -150,13 +225,22 @@ fn a_fix_that_is_run_changes_the_text_once_and_says_whether_it_did() {
     let rig = rig(true);
     rig.ask(23..25);
     let told = requests_of(&rig);
-    let action = told.iter().find(|(method, ..)| method == "textDocument/codeAction").unwrap();
+    let action = told
+        .iter()
+        .find(|(method, ..)| method == "textDocument/codeAction")
+        .unwrap();
     rig.fake.answer(action.2.unwrap(), import());
     settle(&rig.venus);
     let fix = rig.last().unwrap().fixes.remove(0);
     assert!(fix.run());
-    assert_eq!(rig.controller.value().text(), format!("use std::rc::Rc;\n{TEXT}"));
-    assert!(!fix.run(), "it was made for the text that it changed, which is another now");
+    assert_eq!(
+        rig.controller.value().text(),
+        format!("use std::rc::Rc;\n{TEXT}")
+    );
+    assert!(
+        !fix.run(),
+        "it was made for the text that it changed, which is another now"
+    );
     assert!(rig.controller.undo());
     assert_eq!(rig.controller.value().text(), TEXT);
     let _ = &rig.lines;
@@ -167,13 +251,21 @@ fn a_fix_for_a_text_that_was_typed_in_since_is_not_run() {
     let rig = rig(true);
     rig.ask(23..25);
     let told = requests_of(&rig);
-    let action = told.iter().find(|(method, ..)| method == "textDocument/codeAction").unwrap();
+    let action = told
+        .iter()
+        .find(|(method, ..)| method == "textDocument/codeAction")
+        .unwrap();
     rig.fake.answer(action.2.unwrap(), import());
     settle(&rig.venus);
     let fix = rig.last().unwrap().fixes.remove(0);
     rig.controller.replace_range(0..0, "// typed\n");
     assert!(!fix.run());
-    assert!(!rig.controller.value().text().contains("use std::rc"));
+    assert!(
+        !rig.controller
+            .value()
+            .text()
+            .contains("use std::rc")
+    );
 }
 
 #[test]
@@ -181,10 +273,19 @@ fn asking_again_or_cancelling_drops_the_answers_that_were_not_wanted() {
     let rig = rig(true);
     rig.ask(23..25);
     let told = requests_of(&rig);
-    let action = told.iter().find(|(method, ..)| method == "textDocument/codeAction").unwrap();
+    let action = told
+        .iter()
+        .find(|(method, ..)| method == "textDocument/codeAction")
+        .unwrap();
     rig.source.cancel();
     let cancelled = requests_of(&rig);
-    assert!(cancelled.iter().any(|(method, params, _)| method == "$/cancelRequest" && params["id"] == json!(action.2.unwrap())), "{cancelled:?}");
+    assert!(
+        cancelled
+            .iter()
+            .any(|(method, params, _)| method == "$/cancelRequest"
+                && params["id"] == json!(action.2.unwrap())),
+        "{cancelled:?}"
+    );
     let before = rig.shown.borrow().len();
     rig.fake.answer(action.2.unwrap(), import());
     settle(&rig.venus);

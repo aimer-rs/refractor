@@ -55,21 +55,51 @@ mod tests {
         let place = |path: &str, line: u32, character: u32| Place {
             path: PathBuf::from(path),
             at: Position { line, character },
-            end: Position { line, character: character + 5 },
+            end: Position {
+                line,
+                character: character + 5,
+            },
         };
         // The definition is at byte 11, and the click is anywhere on the name: the first character, the middle, and just after it.
         for offset in [11, 13, 16] {
             assert_eq!(
-                is_the_name_itself(&lsp, &text, file, offset, &place("/project/src/main.rs", 0, 11)),
+                is_the_name_itself(
+                    &lsp,
+                    &text,
+                    file,
+                    offset,
+                    &place("/project/src/main.rs", 0, 11)
+                ),
                 Some(11),
                 "offset {offset}"
             );
         }
         // A click on a use of the name, which goes to the definition above it.
-        let used = text.slice(0..text.len()).find("Rules }").unwrap();
-        assert_eq!(is_the_name_itself(&lsp, &text, file, used, &place("/project/src/main.rs", 0, 11)), None);
+        let used = text
+            .slice(0..text.len())
+            .find("Rules }")
+            .unwrap();
+        assert_eq!(
+            is_the_name_itself(
+                &lsp,
+                &text,
+                file,
+                used,
+                &place("/project/src/main.rs", 0, 11)
+            ),
+            None
+        );
         // The same name in another file is another place.
-        assert_eq!(is_the_name_itself(&lsp, &text, file, 12, &place("/project/src/other.rs", 0, 11)), None);
+        assert_eq!(
+            is_the_name_itself(
+                &lsp,
+                &text,
+                file,
+                12,
+                &place("/project/src/other.rs", 0, 11)
+            ),
+            None
+        );
     }
 
     #[test]

@@ -72,12 +72,18 @@ impl FileSync {
     pub const INTERVAL: Duration = Duration::from_millis(750);
 
     pub fn new() -> Rc<Self> {
-        Rc::new(Self { started: Cell::new(false) })
+        Rc::new(Self {
+            started: Cell::new(false),
+        })
     }
 
     /// Begins looking at what `documents` says is open, and telling `report` what was found, which is done outside an update of the
     /// workspace. Does nothing outside the runtime, and the second time.
-    pub fn start(self: &Rc<Self>, documents: Rc<dyn Fn() -> Vec<Rc<Document>>>, report: Rc<dyn Fn(&Rc<Document>, Synced)>) {
+    pub fn start(
+        self: &Rc<Self>,
+        documents: Rc<dyn Fn() -> Vec<Rc<Document>>>,
+        report: Rc<dyn Fn(&Rc<Document>, Synced)>,
+    ) {
         let Some(venus) = Venus::current() else {
             return;
         };

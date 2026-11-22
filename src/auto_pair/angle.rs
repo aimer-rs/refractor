@@ -14,7 +14,8 @@ impl Angle {
     /// The longest name that is read back from the caret: a longer one is not a type.
     const MAX_NAME: usize = 64;
     /// The words after which a name is declared, and so is followed by its generics.
-    const DECLARATIONS: [&'static [u8]; 6] = [b"fn", b"struct", b"enum", b"trait", b"type", b"union"];
+    const DECLARATIONS: [&'static [u8]; 6] =
+        [b"fn", b"struct", b"enum", b"trait", b"type", b"union"];
     /// The words that are followed by generics themselves: `impl<T>`, `for<'a>`.
     const GENERIC_KEYWORDS: [&'static [u8]; 2] = [b"impl", b"for"];
     /// The marks after which a `<` begins a qualified path, `<T as Trait>::Item`: nothing before it could be compared.
@@ -71,7 +72,9 @@ impl Angle {
                 Some(b'\n') | None => return false,
                 Some(b'>')
                     if !matches!(
-                        cursor.checked_sub(1).and_then(|before| text.byte_at(before)),
+                        cursor
+                            .checked_sub(1)
+                            .and_then(|before| text.byte_at(before)),
                         Some(b'-' | b'=')
                     ) =>
                 {

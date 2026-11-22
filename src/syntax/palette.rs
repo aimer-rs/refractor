@@ -7,9 +7,9 @@
 
 use crate::settings::ThemeMode;
 use aimer::Color;
+use aimer::FontWeight;
 use aimer::input::input::SpanStyle;
 use aimer::style::FontStyle;
-use aimer::FontWeight;
 
 /// The style of each kind of token.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -275,16 +275,31 @@ mod tests {
     }
 
     #[test]
-    fn a_parameter_is_not_a_variable_and_both_are_left_as_they_were_in_the_light_palette_but_for_the_parameter() {
+    fn a_parameter_is_not_a_variable_and_both_are_left_as_they_were_in_the_light_palette_but_for_the_parameter()
+     {
         for palette in [SyntaxPalette::dark(), SyntaxPalette::light()] {
-            let of = |name: &str| palette.style_for(name).and_then(|style| style.color);
+            let of = |name: &str| {
+                palette
+                    .style_for(name)
+                    .and_then(|style| style.color)
+            };
             assert_eq!(of("variable.parameter"), Some(palette.parameter));
             assert_eq!(of("parameter"), Some(palette.parameter));
             assert_eq!(of("variable"), Some(palette.variable));
-            assert_eq!(of("variable.builtin"), Some(palette.variable), "`self` is a variable");
+            assert_eq!(
+                of("variable.builtin"),
+                Some(palette.variable),
+                "`self` is a variable"
+            );
         }
-        assert_ne!(SyntaxPalette::dark().parameter, SyntaxPalette::dark().variable);
-        assert_ne!(SyntaxPalette::light().parameter, SyntaxPalette::light().variable);
+        assert_ne!(
+            SyntaxPalette::dark().parameter,
+            SyntaxPalette::dark().variable
+        );
+        assert_ne!(
+            SyntaxPalette::light().parameter,
+            SyntaxPalette::light().variable
+        );
     }
 
     #[test]
@@ -293,10 +308,21 @@ mod tests {
         let constant = palette.style_for("constant").expect("styled");
         assert_eq!(constant.color, Some(Color::Rgb(0xFF, 0x9C, 0xAC)));
         assert_eq!(constant.font_weight, Some(FontWeight::Bold));
-        let builtin = palette.style_for("constant.builtin").expect("styled");
-        assert_eq!(builtin.color, Some(palette.number), "`true` and `None` are not constants of the program");
+        let builtin = palette
+            .style_for("constant.builtin")
+            .expect("styled");
+        assert_eq!(
+            builtin.color,
+            Some(palette.number),
+            "`true` and `None` are not constants of the program"
+        );
         assert_eq!(builtin.font_weight, None);
-        assert_eq!(palette.style_for("number").and_then(|style| style.font_weight), None);
+        assert_eq!(
+            palette
+                .style_for("number")
+                .and_then(|style| style.font_weight),
+            None
+        );
     }
 
     #[test]

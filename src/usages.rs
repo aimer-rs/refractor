@@ -12,10 +12,10 @@ use std::path::{Path, PathBuf};
 use std::rc::{Rc, Weak};
 use std::time::Duration;
 
+use aimer::animation::AnimInstant;
 use aimer::events::element::NamedKey;
 use aimer::input::TextEditingController;
 use aimer::input::input::{FieldSpot, LineLabel, TextSnapshot};
-use aimer::animation::AnimInstant;
 use aimer::share::{ShareRef, Shared};
 use aimer::{Color, ScrollController, SpanStyle, Venus};
 
@@ -91,12 +91,19 @@ impl Heading {
     pub fn file(&self) -> String {
         Path::new(&self.definition)
             .file_name()
-            .map_or_else(|| self.definition.clone(), |name| name.to_string_lossy().into_owned())
+            .map_or_else(
+                || self.definition.clone(),
+                |name| name.to_string_lossy().into_owned(),
+            )
     }
 
     /// How many there are, in words: "27 usages", "1 implementation".
     pub fn count_text(&self) -> String {
-        let noun = if self.count == 1 { self.noun.trim_end_matches('s') } else { self.noun };
+        let noun = if self.count == 1 {
+            self.noun.trim_end_matches('s')
+        } else {
+            self.noun
+        };
         format!("{} {noun}", self.count)
     }
 }
@@ -148,7 +155,15 @@ impl UsageList {
         buffers: &dyn Fn(&Path) -> Option<TextSnapshot>,
         highlighter: &SyntaxHighlighter,
     ) -> Self {
-        Self::build(heading, places, root, spot, column, buffers, Some(highlighter))
+        Self::build(
+            heading,
+            places,
+            root,
+            spot,
+            column,
+            buffers,
+            Some(highlighter),
+        )
     }
 
     fn build(
@@ -164,21 +179,23 @@ impl UsageList {
         let mut files: Vec<FileRows> = Vec::new();
         let mut at: HashMap<&Path, usize> = HashMap::new();
         for place in places.iter().take(Self::MOST_ROWS) {
-            let slot = *at.entry(place.path.as_path()).or_insert_with(|| {
-                files.push(FileRows {
-                    path: place.path.clone(),
-                    name: ShareRef::from(
-                        place
-                            .path
-                            .strip_prefix(root)
-                            .unwrap_or(&place.path)
-                            .display()
-                            .to_string(),
-                    ),
-                    rows: Vec::new(),
+            let slot = *at
+                .entry(place.path.as_path())
+                .or_insert_with(|| {
+                    files.push(FileRows {
+                        path: place.path.clone(),
+                        name: ShareRef::from(
+                            place
+                                .path
+                                .strip_prefix(root)
+                                .unwrap_or(&place.path)
+                                .display()
+                                .to_string(),
+                        ),
+                        rows: Vec::new(),
+                    });
+                    files.len() - 1
                 });
-                files.len() - 1
-            });
             let name = files[slot].name.clone();
             files[slot].rows.push(UsageRow {
                 place: place.clone(),
@@ -190,9 +207,11 @@ impl UsageList {
                 pieces: share(Vec::new()),
             });
         }
-        let mut entries: Vec<UsageEntry> = Vec::with_capacity(places.len().min(Self::MOST_ROWS) + 1);
+        let mut entries: Vec<UsageEntry> =
+            Vec::with_capacity(places.len().min(Self::MOST_ROWS) + 1);
         for mut file in files {
-            file.rows.sort_by_key(|row| (row.place.at.line, row.place.at.character));
+            file.rows
+                .sort_by_key(|row| (row.place.at.line, row.place.at.character));
             let open = buffers(&file.path);
             Self::read_lines(&mut file, column, open);
             for mut row in file.rows {
@@ -216,7 +235,11 @@ impl UsageList {
 
     /// Puts the line of code into each row of `file`, from the file, and marks the name in it. `column` says which byte of a line
     /// the server's character is. A file that cannot be read as text, or is too big, leaves them empty: a place is still listed.
-    fn read_lines(file: &mut FileRows, column: &dyn Fn(&str, u32) -> usize, open: Option<TextSnapshot>) {
+    fn read_lines(
+        file: &mut FileRows,
+        column: &dyn Fn(&str, u32) -> usize,
+        open: Option<TextSnapshot>,
+    ) {
         // A file that is open is read as it is open: the lines the server counts are those of what it was told, which is the editor's text,
         // and the disk has not the changes that were not saved.
         if let Some(open) = open {
@@ -229,8 +252,8 @@ impl UsageList {
             }
             return;
         }
-        let readable = std::fs::metadata(&file.path)
-            .is_ok_and(|meta| meta.len() <= Self::MOST_FILE_BYTES);
+        let readable =
+            std::fs::metadata(&file.path).is_ok_and(|meta| meta.len() <= Self::MOST_FILE_BYTES);
         let Some(text) = readable
             .then(|| std::fs::read_to_string(&file.path).ok())
             .flatten()
@@ -240,7 +263,10 @@ impl UsageList {
         let mut lines = text.lines().enumerate().peekable();
         for row in &mut file.rows {
             let wanted = row.place.at.line as usize;
-            while lines.next_if(|(number, _)| *number < wanted).is_some() {}
+            while lines
+                .next_if(|(number, _)| *number < wanted)
+                .is_some()
+            {}
             if let Some((number, line)) = lines.peek()
                 && *number == wanted
             {
@@ -256,10 +282,20 @@ impl UsageList {
         let shown: String = trimmed.chars().take(Self::MOST_TEXT).collect();
         // The bytes of the name in the whole line, less the blanks that were cut from its start, and as far as is kept.
         let cut = line.len() - line.trim_start().len();
-        let (from, to) = (column(line, row.place.at.character), column(line, row.place.end.character));
+        let (from, to) = (
+            column(line, row.place.at.character),
+            column(line, row.place.end.character),
+        );
         let start = from.saturating_sub(cut).min(shown.len());
-        let end = to.saturating_sub(cut).min(shown.len()).max(start);
-        row.mark = if shown.is_char_boundary(start) && shown.is_char_boundary(end) { start..end } else { 0..0 };
+        let end = to
+            .saturating_sub(cut)
+            .min(shown.len())
+            .max(start);
+        row.mark = if shown.is_char_boundary(start) && shown.is_char_boundary(end) {
+            start..end
+        } else {
+            0..0
+        };
         row.text = shown;
     }
 
@@ -326,7 +362,9 @@ impl Loaded {
         let mut lines = HashMap::new();
         for (index, lens) in lenses.iter().enumerate() {
             if lens.usages_caption().is_some() || lens.implementations_caption().is_some() {
-                lines.entry(text.byte_to_line(lens.at.min(text.len()))).or_insert(index);
+                lines
+                    .entry(text.byte_to_line(lens.at.min(text.len())))
+                    .or_insert(index);
             }
         }
         Self {
@@ -444,7 +482,10 @@ impl Usages {
             {
                 let mut hooks = self.row_hooks.borrow_mut();
                 // Not if the row was made again meanwhile, which is not gone.
-                if hooks.get(&index).is_some_and(|now| Rc::ptr_eq(now, &hook)) {
+                if hooks
+                    .get(&index)
+                    .is_some_and(|now| Rc::ptr_eq(now, &hook))
+                {
                     hooks.remove(&index);
                 }
             }
@@ -466,10 +507,13 @@ impl Usages {
 
     /// Whether the server is ready and has nothing it is busy with.
     fn server_idle(&self) -> bool {
-        self.context.borrow().as_ref().is_some_and(|context| {
-            let summary = context.lsp.summary(&context.path);
-            summary.status == Some(Status::Ready) && summary.progress.is_none()
-        })
+        self.context
+            .borrow()
+            .as_ref()
+            .is_some_and(|context| {
+                let summary = context.lsp.summary(&context.path);
+                summary.status == Some(Status::Ready) && summary.progress.is_none()
+            })
     }
 
     fn schedule_load(self: &Rc<Self>, delay: Duration) {
@@ -503,12 +547,13 @@ impl Usages {
     /// Asks the server for the lenses of the file now. What it said is kept, and the pane is drawn again; where it could not say,
     /// what was kept stays.
     fn refresh(self: &Rc<Self>) {
-        let Some((lsp, path, controller)) = self
-            .context
-            .borrow()
-            .as_ref()
-            .map(|context| (context.lsp.clone(), context.path.clone(), context.controller.clone()))
-        else {
+        let Some((lsp, path, controller)) = self.context.borrow().as_ref().map(|context| {
+            (
+                context.lsp.clone(),
+                context.path.clone(),
+                context.controller.clone(),
+            )
+        }) else {
             return;
         };
         let old = self.load.borrow_mut().take();
@@ -558,7 +603,9 @@ impl Usages {
             .font_family(crate::fonts::ui_family());
         if let Some(usages) = lens.usages_caption() {
             let this = Rc::downgrade(self);
-            label = label.button(usages, move |spot| Self::open(&this, index, Which::Usages, spot));
+            label = label.button(usages, move |spot| {
+                Self::open(&this, index, Which::Usages, spot)
+            });
         }
         if let Some(implementations) = lens.implementations_caption() {
             if lens.usages_caption().is_some() {
@@ -570,7 +617,9 @@ impl Usages {
             });
         }
         let label = Rc::new(label);
-        self.labels.borrow_mut().insert(index, Rc::clone(&label));
+        self.labels
+            .borrow_mut()
+            .insert(index, Rc::clone(&label));
         Some(label)
     }
 
@@ -605,29 +654,64 @@ impl Usages {
         true
     }
 
-    fn show(&self, lens: &Lens, which: Which, spot: FieldSpot) {
-        let Some((root, path, lsp, snapshot, mode, buffers)) = self.context.borrow().as_ref().map(|context| {
-            (
-                context.root.clone(),
-                context.path.clone(),
-                context.lsp.clone(),
-                context.controller.snapshot(),
-                context.mode,
-                Rc::clone(&context.buffers),
-            )
-        }) else {
+    /// Lists who uses the name that starts at the byte `at`, hanging from `spot`: at once for a definition that has a count, which already has
+    /// the places, and for any other name when the language server has said where they are. Nothing is opened for a name that is not used, or
+    /// that the server cannot say.
+    pub fn find_usages_at(self: &Rc<Self>, at: usize, spot: FieldSpot) {
+        if self.show_usages_at(at, spot) {
+            return;
+        }
+        let Some((lsp, path)) = self
+            .context
+            .borrow()
+            .as_ref()
+            .map(|context| (context.lsp.clone(), context.path.clone()))
+        else {
             return;
         };
+        let this = Rc::downgrade(self);
+        lsp.references(&path, at, move |places| {
+            if let (Some(this), Some(places)) = (this.upgrade(), places) {
+                this.show_places(&places, "usages", at, spot);
+            }
+        });
+    }
+
+    fn show(&self, lens: &Lens, which: Which, spot: FieldSpot) {
         let (places, noun) = match which {
             Which::Usages => (lens.usages.as_deref().unwrap_or_default(), "usages"),
-            Which::Implementations => (lens.implementations.as_deref().unwrap_or_default(), "implementations"),
+            Which::Implementations => (
+                lens.implementations
+                    .as_deref()
+                    .unwrap_or_default(),
+                "implementations",
+            ),
+        };
+        self.show_places(places, noun, lens.at, spot);
+    }
+
+    /// Opens the list of `places`, which are the `noun` of the name that starts at the byte `at`, hanging from `spot`. Nothing is opened for no places.
+    fn show_places(&self, places: &[Place], noun: &'static str, at: usize, spot: FieldSpot) {
+        let Some((root, path, lsp, snapshot, mode, buffers)) =
+            self.context.borrow().as_ref().map(|context| {
+                (
+                    context.root.clone(),
+                    context.path.clone(),
+                    context.lsp.clone(),
+                    context.controller.snapshot(),
+                    context.mode,
+                    Rc::clone(&context.buffers),
+                )
+            })
+        else {
+            return;
         };
         if places.is_empty() {
             return;
         }
         let heading = Heading {
-            kind: Self::kind_of(&Self::line_before(&snapshot, lens.at)),
-            name: Self::name_at(&snapshot, lens.at),
+            kind: Self::kind_of(&Self::line_before(&snapshot, at)),
+            name: Self::name_at(&snapshot, at),
             definition: path
                 .strip_prefix(&root)
                 .unwrap_or(&path)
@@ -645,10 +729,24 @@ impl Usages {
         };
         // The file of this pane is the one the pane has, and the others that are open are the workspace's.
         let (own, own_text) = (path.clone(), snapshot.clone());
-        let open = move |file: &Path| if file == own { Some(own_text.clone()) } else { buffers(file) };
+        let open = move |file: &Path| {
+            if file == own {
+                Some(own_text.clone())
+            } else {
+                buffers(file)
+            }
+        };
         // The lines of code are colored once, when the list opens, and not each time the card is drawn for another row.
         let highlighter = SyntaxHighlighter::rust(SyntaxPalette::for_mode(mode));
-        let list = UsageList::gather_highlighted(heading, places, &root, spot, &column, &open, &highlighter);
+        let list = UsageList::gather_highlighted(
+            heading,
+            places,
+            &root,
+            spot,
+            &column,
+            &open,
+            &highlighter,
+        );
         self.selected.set(0);
         *self.list.borrow_mut() = Some(Rc::new(list));
         self.list_changed.fire();
@@ -679,7 +777,11 @@ impl Usages {
     fn name_at(text: &TextSnapshot, at: usize) -> String {
         let mut name = String::new();
         let mut byte = at;
-        while let Some(ch) = text.byte_at(byte).filter(u8::is_ascii).map(char::from) {
+        while let Some(ch) = text
+            .byte_at(byte)
+            .filter(u8::is_ascii)
+            .map(char::from)
+        {
             if !(ch.is_alphanumeric() || ch == '_') {
                 break;
             }
@@ -696,7 +798,10 @@ impl Usages {
 
     /// Which place of the list is chosen, if a list is open.
     pub fn selected(&self) -> Option<usize> {
-        self.list.borrow().as_ref().map(|_| self.selected.get())
+        self.list
+            .borrow()
+            .as_ref()
+            .map(|_| self.selected.get())
     }
 
     /// The scroll of the list, for the card to scroll in. Clones share it.
@@ -712,17 +817,31 @@ impl Usages {
     /// Moves the choice `by` rows, down for more, and no further than the first and the last, and brings the row into view. Whether a
     /// list is open: the key is the list's then, wherever the choice can go.
     pub fn move_selection(&self, by: isize) -> bool {
-        let Some(count) = self.list.borrow().as_ref().map(|list| list.len()) else {
+        let Some(count) = self
+            .list
+            .borrow()
+            .as_ref()
+            .map(|list| list.len())
+        else {
             return false;
         };
-        let target = self.selected.get().saturating_add_signed(by).min(count.saturating_sub(1));
+        let target = self
+            .selected
+            .get()
+            .saturating_add_signed(by)
+            .min(count.saturating_sub(1));
         self.choose(target, true);
         true
     }
 
     /// Chooses the first row, or the last, and brings it into view. Whether a list is open.
     pub fn select_edge(&self, last: bool) -> bool {
-        let Some(count) = self.list.borrow().as_ref().map(|list| list.len()) else {
+        let Some(count) = self
+            .list
+            .borrow()
+            .as_ref()
+            .map(|list| list.len())
+        else {
             return false;
         };
         self.choose(if last { count.saturating_sub(1) } else { 0 }, true);
@@ -739,7 +858,13 @@ impl Usages {
             .keyed_at
             .get()
             .is_some_and(|at| at.elapsed() < Self::KEY_HOLD);
-        if !held && self.list.borrow().as_ref().is_some_and(|list| index < list.len()) {
+        if !held
+            && self
+                .list
+                .borrow()
+                .as_ref()
+                .is_some_and(|list| index < list.len())
+        {
             self.choose(index, false);
         }
     }
@@ -753,7 +878,11 @@ impl Usages {
             return;
         }
         if by_key {
-            let count = self.list.borrow().as_ref().map_or(0, |list| list.len());
+            let count = self
+                .list
+                .borrow()
+                .as_ref()
+                .map_or(0, |list| list.len());
             let hook = self.reveal.borrow().clone();
             if let Some(hook) = hook {
                 hook(index, count);
@@ -791,7 +920,9 @@ impl Usages {
             NamedKey::Home => self.select_edge(false),
             NamedKey::End => self.select_edge(true),
             NamedKey::Enter => {
-                return self.open_selected().map_or(Taken::Yes, Taken::Go);
+                return self
+                    .open_selected()
+                    .map_or(Taken::Yes, Taken::Go);
             }
             NamedKey::Escape => {
                 self.close();

@@ -79,7 +79,9 @@ impl AutoSave {
         }
         let wait = self.next_wait.get();
         self.next_wait.set(wait + 1);
-        self.waits.borrow_mut().insert(document.id, wait);
+        self.waits
+            .borrow_mut()
+            .insert(document.id, wait);
         let (this, document) = (Rc::downgrade(self), Rc::downgrade(document));
         if let Some(venus) = Venus::current() {
             let waited = venus.sleep(self.delay.get());
@@ -129,7 +131,10 @@ impl AutoSave {
         }
         for document in documents {
             // The one that is shown is being edited; a tab that is not a file shows no file.
-            if before == Some(document.id) && shown != Some(document.id) && document.id != SETTINGS_TAB {
+            if before == Some(document.id)
+                && shown != Some(document.id)
+                && document.id != SETTINGS_TAB
+            {
                 self.save(document);
             }
         }
@@ -174,7 +179,10 @@ impl AutoSave {
 
 impl std::fmt::Debug for AutoSave {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.debug_struct("AutoSave").field("mode", &self.mode.get()).finish_non_exhaustive()
+        formatter
+            .debug_struct("AutoSave")
+            .field("mode", &self.mode.get())
+            .finish_non_exhaustive()
     }
 }
 

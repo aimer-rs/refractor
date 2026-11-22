@@ -40,7 +40,11 @@ pub struct Fix {
 
 impl Fix {
     /// A fix called `title` that does `run`, which says whether it did anything.
-    pub fn new(title: impl Into<String>, preferred: bool, run: impl Fn() -> bool + 'static) -> Self {
+    pub fn new(
+        title: impl Into<String>,
+        preferred: bool,
+        run: impl Fn() -> bool + 'static,
+    ) -> Self {
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         Self {
             id: NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
@@ -64,7 +68,11 @@ impl PartialEq for Fix {
 
 impl std::fmt::Debug for Fix {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.debug_struct("Fix").field("title", &self.title).field("preferred", &self.preferred).finish()
+        formatter
+            .debug_struct("Fix")
+            .field("title", &self.title)
+            .field("preferred", &self.preferred)
+            .finish()
     }
 }
 
@@ -93,7 +101,12 @@ struct Fence<'a> {
 impl Card {
     /// A card of the words of a name and nothing else.
     pub fn docs(spot: HoverSpot, markdown: String) -> Self {
-        Self { spot, markdown, problems: Vec::new(), fixes: Vec::new() }
+        Self {
+            spot,
+            markdown,
+            problems: Vec::new(),
+            fixes: Vec::new(),
+        }
     }
 
     /// `markdown` as the card shows it: the code blocks that follow each other are one block. A server says what a name is in
@@ -272,12 +285,18 @@ impl HoverCell {
 
     /// Whether the card has more than one fix, which is when there is a list to open.
     pub fn has_more_fixes(&self) -> bool {
-        self.card.borrow().as_ref().is_some_and(|card| card.fixes.len() > 1)
+        self.card
+            .borrow()
+            .as_ref()
+            .is_some_and(|card| card.fixes.len() > 1)
     }
 
     /// The fix to do when the key for it is pressed: the first of the card's, if it has any. None where no card is shown.
     pub fn first_fix(&self) -> Option<Fix> {
-        self.card.borrow().as_ref().and_then(|card| card.fixes.first().cloned())
+        self.card
+            .borrow()
+            .as_ref()
+            .and_then(|card| card.fixes.first().cloned())
     }
 
     /// Shows `card`, in place of the one that is shown, and puts off what was about to take that one away.
@@ -287,7 +306,12 @@ impl HoverCell {
             return;
         }
         // Another place is not the list that was opened at the one before.
-        if self.card.borrow().as_ref().is_none_or(|shown| shown.spot.range != card.spot.range) {
+        if self
+            .card
+            .borrow()
+            .as_ref()
+            .is_none_or(|shown| shown.spot.range != card.spot.range)
+        {
             self.expanded.set(false);
         }
         *self.card.borrow_mut() = Some(card);
@@ -363,7 +387,10 @@ pub fn follow(
         cell,
         move |spot, publish| {
             let start = spot.range.start;
-            ask(start, Box::new(move |said| publish(said.map(|hover| Card::docs(spot, hover.markdown)))));
+            ask(
+                start,
+                Box::new(move |said| publish(said.map(|hover| Card::docs(spot, hover.markdown)))),
+            );
         },
         cancel,
     )

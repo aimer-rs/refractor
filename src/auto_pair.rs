@@ -61,11 +61,14 @@ impl AutoPair {
         let after = Self::char_after(text, at);
         match ch {
             ')' | ']' | '}' => (after == Some(ch)).then_some(Typed::Over { len: 1 }),
-            '<' => (Self::closes_before(after) && Angle::opens(text, at, after)).then_some(Typed::Pair {
-                open: '<',
-                close: '>',
-            }),
-            '>' => (after == Some('>') && Angle::steps_over(text, at)).then_some(Typed::Over { len: 1 }),
+            '<' => (Self::closes_before(after) && Angle::opens(text, at, after)).then_some(
+                Typed::Pair {
+                    open: '<',
+                    close: '>',
+                },
+            ),
+            '>' => (after == Some('>') && Angle::steps_over(text, at))
+                .then_some(Typed::Over { len: 1 }),
             '#' => Self::over_mark(text, at, after),
             '(' | '[' | '{' => {
                 let close = Self::closer_of(ch).expect("an opener has a closer");
@@ -167,7 +170,10 @@ impl AutoPair {
         let line = Literal::line(text, at)?;
         match Literal::within(&line) {
             Within::Text => return (after == Some('"')).then_some(Typed::Over { len: 1 }),
-            Within::Raw { hashes, closing: None } => {
+            Within::Raw {
+                hashes,
+                closing: None,
+            } => {
                 // The quote that ends it, and the marks it ends with.
                 let ends = after == Some('"')
                     && (0..hashes).all(|mark| text.byte_at(at + 1 + mark) == Some(b'#'));
@@ -200,7 +206,10 @@ impl AutoPair {
             return None;
         }
         match Literal::within(&Literal::line(text, at)?) {
-            Within::Raw { hashes, closing: Some(marks) } if marks < hashes => Some(Typed::Over { len: 1 }),
+            Within::Raw {
+                hashes,
+                closing: Some(marks),
+            } if marks < hashes => Some(Typed::Over { len: 1 }),
             _ => None,
         }
     }
@@ -224,7 +233,10 @@ impl AutoPair {
     fn is_byte_prefix(text: &TextSnapshot, at: usize) -> bool {
         at > 0
             && text.byte_at(at - 1) == Some(b'b')
-            && (at < 2 || text.byte_at(at - 2).is_some_and(|before| !Literal::is_word(before)))
+            && (at < 2
+                || text
+                    .byte_at(at - 2)
+                    .is_some_and(|before| !Literal::is_word(before)))
     }
 
     /// Whether what is before `at` is a character literal that lacks only its closing quote: `'`, `'x`, or `'\x`.

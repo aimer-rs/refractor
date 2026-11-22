@@ -50,7 +50,9 @@ impl Stepper {
     /// The value one `step` from `value`, which is the end of the range where a whole step does not fit in what is left of it, or
     /// `None` where the value is at that end already.
     fn stepped(value: i64, step: i64, range: &RangeInclusive<i64>) -> Option<i64> {
-        let next = value.checked_add(step)?.clamp(*range.start(), *range.end());
+        let next = value
+            .checked_add(step)?
+            .clamp(*range.start(), *range.end());
         (next != value).then_some(next)
     }
 }
@@ -127,17 +129,30 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_step_can_be_more_than_one_and_the_last_one_goes_to_the_end_when_the_whole_step_does_not_fit() {
+    fn a_step_can_be_more_than_one_and_the_last_one_goes_to_the_end_when_the_whole_step_does_not_fit()
+     {
         let range = 100..=30_000;
         assert_eq!(Stepper::stepped(1000, 100, &range), Some(1100));
         assert_eq!(Stepper::stepped(1000, -100, &range), Some(900));
-        assert_eq!(Stepper::stepped(100, -100, &range), None, "no less than the smallest");
-        assert_eq!(Stepper::stepped(29_950, 100, &range), Some(30_000), "what is left of the range is a step");
+        assert_eq!(
+            Stepper::stepped(100, -100, &range),
+            None,
+            "no less than the smallest"
+        );
+        assert_eq!(
+            Stepper::stepped(29_950, 100, &range),
+            Some(30_000),
+            "what is left of the range is a step"
+        );
         assert_eq!(Stepper::stepped(30_000, 100, &range), None);
         assert_eq!(Stepper::stepped(150, -100, &range), Some(100));
         let by_hundreds = Stepper::new(1000, range, "ms", Rc::new(|_| {})).step(100);
         assert_eq!(by_hundreds.step, 100);
-        assert_eq!(Stepper::new(1, 0..=5, "", Rc::new(|_| {})).step, 1, "one unless it is said");
+        assert_eq!(
+            Stepper::new(1, 0..=5, "", Rc::new(|_| {})).step,
+            1,
+            "one unless it is said"
+        );
     }
 
     #[test]

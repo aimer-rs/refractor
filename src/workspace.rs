@@ -8,6 +8,7 @@ use std::rc::Rc;
 use aimer::{ProviderHandle, Venus};
 
 use crate::auto_save::AutoSave;
+use crate::cargo::source::ManifestSource;
 use crate::completion::LspSource;
 use crate::document::{Document, Language};
 use crate::file_sync::FileSync;
@@ -195,6 +196,9 @@ impl Workspace {
             self.lsp.open(path, &document.controller, told);
             // And the items it offers to complete a word are asked of it.
             document.set_completions(LspSource::new(self.lsp.clone(), path.to_path_buf()));
+        } else if document.is_cargo_manifest() {
+            // A manifest has no server: the schema says what could be written, and is read as it is asked.
+            document.set_completions(ManifestSource::new(document.controller.clone()));
         }
         self.documents.push(document);
         Ok(())
@@ -232,6 +236,26 @@ impl Workspace {
         Ok(())
     }
 
+    /// Shows the bytes `range` of the file `path`, opening the file if it is not open: for a place that was found by reading the text, with
+    /// no server to say it. A range past the end is the end. A file that cannot be opened is not gone to.
+    pub fn go_to_bytes(
+        &mut self,
+        path: &Path,
+        range: std::ops::Range<usize>,
+        notify: Rc<dyn Fn()>,
+    ) -> io::Result<()> {
+        self.open(path, notify)?;
+        let document = self
+            .documents
+            .iter()
+            .find(|document| document.path == path)
+            .expect("a file that was opened is open");
+        let len = document.controller.snapshot().len();
+        let start = range.start.min(len);
+        document.show(start..range.end.clamp(start, len));
+        Ok(())
+    }
+
     /// Shows `len` bytes at the byte `column` of the line `line` (counted from 1) of the file `path`, opening the file if it is not
     /// open, as [`go_to_place`](Self::go_to_place) does for a place the server named. This is for a place that was found by reading
     /// the file, which counts bytes. A line past the end is the last, a column past the end of its line is its end, and a line of
@@ -251,7 +275,9 @@ impl Workspace {
             .find(|document| document.path == path)
             .expect("a file that was opened is open");
         let snapshot = document.controller.snapshot();
-        let row = line.saturating_sub(1).min(snapshot.line_count().saturating_sub(1));
+        let row = line
+            .saturating_sub(1)
+            .min(snapshot.line_count().saturating_sub(1));
         let row = snapshot.line_range(row);
         let start = (row.start + column).min(row.end);
         document.show(start..start.saturating_add(len));
@@ -427,7 +453,9 @@ impl Workspace {
         let message = match found {
             Synced::Same => return,
             Synced::Reloaded => format!("{name} changed on disk and was reloaded"),
-            Synced::Conflict => format!("{name} changed on disk, and so did you: save to overwrite it, or close the tab to discard your changes"),
+            Synced::Conflict => format!(
+                "{name} changed on disk, and so did you: save to overwrite it, or close the tab to discard your changes"
+            ),
             Synced::Deleted => format!("{name} was deleted from disk: save to write it again"),
             Synced::Failed(why) => format!("{name} changed on disk but could not be read: {why}"),
         };
@@ -506,11 +534,14 @@ pub fn choose_root(
     });
     let current = current.filter(|path| path.parent().is_some());
     [from_argument, variable, current, home]
-    .into_iter()
-    .flatten()
-    .find(|path| path.is_dir())
-    .unwrap_or_else(|| PathBuf::from("."))
+        .into_iter()
+        .flatten()
+        .find(|path| path.is_dir())
+        .unwrap_or_else(|| PathBuf::from("."))
 }
+
+mod rename;
+pub use self::rename::Renamed;
 
 #[cfg(test)]
 mod tests {
@@ -593,8 +624,12 @@ mod tests {
         let a = scratch.file("a.txt", "one\r\n// caf\u{e9} needle\nthree");
         let mut space = workspace(&scratch);
         // The second line (counted from 1), seven bytes in: `needle` is after the accent, which is two bytes.
-        space.go_to_line(&a, 2, "// caf\u{e9} ".len(), 6, notify()).unwrap();
-        let active = space.active_document().expect("the file was opened and is the one shown");
+        space
+            .go_to_line(&a, 2, "// caf\u{e9} ".len(), 6, notify())
+            .unwrap();
+        let active = space
+            .active_document()
+            .expect("the file was opened and is the one shown");
         let line = active.controller.snapshot().line_range(1);
         let start = line.start + "// caf\u{e9} ".len();
         assert_eq!(active.controller.value().selection().range(), start..start);
@@ -602,24 +637,72 @@ mod tests {
     }
 
     #[test]
+    fn going_to_bytes_opens_the_file_shows_them_and_clamps_to_the_text() {
+        let scratch = Scratch::new("go-to-bytes");
+        let a = scratch.file("a.txt", "one\ncaf\u{e9}\n");
+        let b = scratch.file("b.txt", "b");
+        let mut space = workspace(&scratch);
+        space.go_to_bytes(&a, 4..9, notify()).unwrap();
+        let active = space.active_document().expect("shown");
+        assert_eq!(active.path, a);
+        assert_eq!(active.controller.value().selection().range(), 4..4);
+        assert_eq!(active.controller.take_locate(), Some(4..9));
+        space
+            .go_to_bytes(&b, 99..120, notify())
+            .unwrap();
+        assert_eq!(
+            space
+                .active_document()
+                .unwrap()
+                .controller
+                .value()
+                .selection()
+                .range(),
+            1..1
+        );
+        space.go_to_bytes(&a, 0..0, notify()).unwrap();
+        assert_eq!(space.documents.len(), 2, "an open file is not opened again");
+        assert!(
+            space
+                .go_to_bytes(&scratch.0.join("gone.txt"), 0..0, notify())
+                .is_err()
+        );
+    }
+
+    #[test]
     fn going_to_a_line_that_is_not_there_goes_to_the_end_of_the_text_and_not_past_it() {
         let scratch = Scratch::new("go-to-line-past");
         let a = scratch.file("a.txt", "one\ntwo");
         let mut space = workspace(&scratch);
-        space.go_to_line(&a, 99, 99, 5, notify()).unwrap();
+        space
+            .go_to_line(&a, 99, 99, 5, notify())
+            .unwrap();
         let active = space.active_document().unwrap();
         let len = active.controller.value().len();
         assert_eq!(active.controller.value().selection().range(), len..len);
         // A line of zero, which is not a line number, is the first.
         space.go_to_line(&a, 0, 0, 1, notify()).unwrap();
-        assert_eq!(space.active_document().unwrap().controller.value().selection().range(), 0..0);
+        assert_eq!(
+            space
+                .active_document()
+                .unwrap()
+                .controller
+                .value()
+                .selection()
+                .range(),
+            0..0
+        );
     }
 
     #[test]
     fn going_to_a_line_of_a_file_that_is_not_there_is_an_error_and_changes_nothing() {
         let scratch = Scratch::new("go-to-line-missing");
         let mut space = workspace(&scratch);
-        assert!(space.go_to_line(&scratch.0.join("gone.txt"), 1, 0, 1, notify()).is_err());
+        assert!(
+            space
+                .go_to_line(&scratch.0.join("gone.txt"), 1, 0, 1, notify())
+                .is_err()
+        );
         assert!(space.documents.is_empty());
     }
 
@@ -698,17 +781,27 @@ mod tests {
     }
 
     #[test]
-    fn the_text_of_a_file_that_is_open_is_the_editors_with_its_changes_and_a_file_that_is_not_open_has_none() {
+    fn the_text_of_a_file_that_is_open_is_the_editors_with_its_changes_and_a_file_that_is_not_open_has_none()
+     {
         let scratch = Scratch::new("buffer-of");
         let file = scratch.file("a.rs", "one\ntwo\n");
         let closed = scratch.file("b.rs", "x\n");
         let mut space = Workspace::new(scratch.0.clone());
         space.open(&file, notify()).unwrap();
         let document = space.active_document().expect("open").clone();
-        document.controller.replace_range(0..0, "zero\n");
+        document
+            .controller
+            .replace_range(0..0, "zero\n");
         let text = space.buffer_of(&file).expect("open");
-        assert_eq!(text.slice(0..text.len()).to_string(), "zero\none\ntwo\n", "what is not saved is in it");
-        assert!(space.buffer_of(&closed).is_none(), "a file that is not open is the disk's");
+        assert_eq!(
+            text.slice(0..text.len()).to_string(),
+            "zero\none\ntwo\n",
+            "what is not saved is in it"
+        );
+        assert!(
+            space.buffer_of(&closed).is_none(),
+            "a file that is not open is the disk's"
+        );
     }
 
     #[test]
@@ -884,7 +977,8 @@ mod tests {
     }
 
     #[test]
-    fn what_was_found_of_a_file_that_something_else_changed_is_a_message_unless_it_is_what_nothing_needs_said_of() {
+    fn what_was_found_of_a_file_that_something_else_changed_is_a_message_unless_it_is_what_nothing_needs_said_of()
+     {
         use crate::file_sync::Synced;
         let scratch = Scratch::new("external");
         let path = scratch.file("a.rs", "a");
@@ -893,17 +987,42 @@ mod tests {
         let document = Rc::clone(&space.documents[0]);
         space.message = Some("an old message".to_owned());
         space.report_external(&document, &Synced::Same);
-        assert_eq!(space.message.as_deref(), Some("an old message"), "nothing found, nothing said");
+        assert_eq!(
+            space.message.as_deref(),
+            Some("an old message"),
+            "nothing found, nothing said"
+        );
         space.report_external(&document, &Synced::Reloaded);
-        assert_eq!(space.message.as_deref(), Some("a.rs changed on disk and was reloaded"));
+        assert_eq!(
+            space.message.as_deref(),
+            Some("a.rs changed on disk and was reloaded")
+        );
         space.report_external(&document, &Synced::Conflict);
-        let said = space.message.clone().expect("a conflict is said");
-        assert!(said.starts_with("a.rs changed on disk, and so did you"), "{said}");
-        assert!(said.contains("save to overwrite") && said.contains("close"), "what can be done is said: {said}");
+        let said = space
+            .message
+            .clone()
+            .expect("a conflict is said");
+        assert!(
+            said.starts_with("a.rs changed on disk, and so did you"),
+            "{said}"
+        );
+        assert!(
+            said.contains("save to overwrite") && said.contains("close"),
+            "what can be done is said: {said}"
+        );
         space.report_external(&document, &Synced::Deleted);
-        assert_eq!(space.message.as_deref(), Some("a.rs was deleted from disk: save to write it again"));
-        space.report_external(&document, &Synced::Failed("stream did not contain valid UTF-8".to_owned()));
-        assert_eq!(space.message.as_deref(), Some("a.rs changed on disk but could not be read: stream did not contain valid UTF-8"));
+        assert_eq!(
+            space.message.as_deref(),
+            Some("a.rs was deleted from disk: save to write it again")
+        );
+        space.report_external(
+            &document,
+            &Synced::Failed("stream did not contain valid UTF-8".to_owned()),
+        );
+        assert_eq!(
+            space.message.as_deref(),
+            Some("a.rs changed on disk but could not be read: stream did not contain valid UTF-8")
+        );
         assert_eq!(space.closing, None);
     }
 
@@ -999,10 +1118,7 @@ mod tests {
             choose_root(None, Some(folder.clone()), Some(other), None),
             folder
         );
-        assert_eq!(
-            choose_root(None, None, Some(folder.clone()), None),
-            folder
-        );
+        assert_eq!(choose_root(None, None, Some(folder.clone()), None), folder);
         assert_eq!(
             choose_root(None, None, Some(PathBuf::from("/")), Some(folder.clone())),
             folder,
@@ -1018,10 +1134,7 @@ mod tests {
             ),
             folder
         );
-        assert_eq!(
-            choose_root(None, None, None, None),
-            PathBuf::from(".")
-        );
+        assert_eq!(choose_root(None, None, None, None), PathBuf::from("."));
     }
 
     #[test]

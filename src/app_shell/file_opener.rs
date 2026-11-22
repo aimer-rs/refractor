@@ -1,3 +1,4 @@
+use crate::session::Session;
 use crate::workspace::{Workspace, notifier, refresh_status};
 use aimer::events::file_open::{self, FileGuard};
 use aimer::{
@@ -50,15 +51,20 @@ impl State<FileOpener> for FileOpenerState {
             open(&handler_store, paths, false)
         }));
 
-        // With nothing open, the folder's own entry point is: an editor that starts on an empty page
-        // has nothing to show of itself.
-        let notify = notifier(&store);
-        store.update(|space| {
-            let main = space.root.join("src").join("main.rs");
-            if space.documents.is_empty() && main.is_file() {
-                let _ = space.open(&main, notify);
-            }
-        });
+        // What was open when the folder was last used comes back. With nothing to bring back, the folder's own
+        // entry point is opened: an editor that starts on an empty page has nothing to show of itself.
+        if !Session::restore_from_disk(&store) {
+            let notify = notifier(&store);
+            store.update(|space| {
+                let main = space.root.join("src").join("main.rs");
+                if space.documents.is_empty() && main.is_file() {
+                    let _ = space.open(&main, notify);
+                }
+            });
+        }
+        // What is open is written down when it changes, from here on and not before: a session is not written over
+        // by the empty editor that was there until it was brought back.
+        Session::keep(store.clone());
 
         refresh_status(&store);
 
@@ -107,7 +113,11 @@ fn folder_action(current: &Path, folder: &Path, launching: bool) -> FolderAction
 /// Starts another instance of the app on `folder`; `Workspace::initial` reads it as its first argument.
 fn open_new_window(folder: &Path) -> bool {
     std::env::current_exe()
-        .and_then(|exe| std::process::Command::new(exe).arg(folder).spawn())
+        .and_then(|exe| {
+            std::process::Command::new(exe)
+                .arg(folder)
+                .spawn()
+        })
         .is_ok()
 }
 
@@ -124,6 +134,7 @@ fn open(store: &ProviderHandle<Workspace>, paths: &[PathBuf], launching: bool) -
                 FolderAction::Keep => taken = true,
                 FolderAction::Adopt => {
                     store.update(|space| space.set_root(path.clone()));
+                    Session::restore_from_disk(store);
                     refresh_status(store);
                     taken = true;
                 }
@@ -156,8 +167,14 @@ mod tests {
         let here = Path::new("/work/a");
         assert_eq!(folder_action(here, here, false), FolderAction::Keep);
         assert_eq!(folder_action(here, here, true), FolderAction::Keep);
-        assert_eq!(folder_action(here, Path::new("/work/b"), false), FolderAction::NewWindow);
-        assert_eq!(folder_action(here, Path::new("/work/b"), true), FolderAction::Adopt);
+        assert_eq!(
+            folder_action(here, Path::new("/work/b"), false),
+            FolderAction::NewWindow
+        );
+        assert_eq!(
+            folder_action(here, Path::new("/work/b"), true),
+            FolderAction::Adopt
+        );
     }
 
     #[test]

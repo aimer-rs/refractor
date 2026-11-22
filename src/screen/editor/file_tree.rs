@@ -4,8 +4,8 @@ use crate::fonts;
 use crate::theme::CodeTheme;
 use crate::tree::Row;
 use crate::workspace::Workspace;
-use aimer::share::{ShareRef, Shared};
-use aimer::style::Theme;
+use aimer::share::{RcProjectExt, ShareRef, Shared};
+use aimer::style::{TextAlign, Theme};
 use aimer::{
     BuildContext, Column, Container, ProviderContext, Scrollable, StatelessWidget, Text, Widget,
 };
@@ -20,23 +20,30 @@ impl StatelessWidget for FileTree {
         let theme = *CodeTheme::of(ctx);
         // The rows are made when the folder changes, and shared: this is a handle to them.
         let rows = ctx.select::<Workspace, Rc<Vec<Row>>>(|space| space.rows());
-        let items: Vec<_> = if rows.is_empty() {
-            vec![
-                Text::new("This folder is empty")
-                    .text_style(fonts::ui().font_size(13).color(theme.muted))
-                    .boxed(),
-            ]
+        let rows: Vec<_> = (0..rows.len())
+            .into_iter()
+            .map(move |i| rows.project(move |r| &r[i]))
+            .collect();
+        let top_pad = if rows.is_empty() { 8 } else { 2 };
+
+        let child = if rows.is_empty() {
+            Text::new("This folder is empty")
+                .text_align(TextAlign::TopCenter)
+                .text_style(fonts::ui().font_size(13).color(theme.muted))
+                .boxed()
         } else {
-            rows.iter()
-                .map(|row| FileRow::new(ShareRef::from(Shared::new(row.clone()))).boxed())
-                .collect()
+            Column::new()
+                .list(rows)
+                .builder(move |row| FileRow::new(row.clone()))
+                .boxed()
         };
+
         Scrollable::new()
             .vertical_scroll_bar(None)
             .child(
                 Container::new()
-                    .padding(pad(2, 0, 12, 0))
-                    .child(Column::new().children(items)),
+                    .padding(pad(top_pad, 0, 12, 0))
+                    .child(child),
             )
     }
 }

@@ -15,9 +15,9 @@ use std::path::PathBuf;
 use std::rc::{Rc, Weak};
 use std::time::Duration;
 
+use aimer::Venus;
 use aimer::input::TextEditingController;
 use aimer::input::input::{SpanStyle, StyledRange, TextSnapshot};
-use aimer::Venus;
 
 pub use self::scheme::{Look, Rule, Scheme};
 use crate::components::popup::Redraw;
@@ -49,18 +49,32 @@ impl Resolved {
         let mut known: HashMap<(u32, u32), Option<u16>> = HashMap::new();
         let mut tokens = Vec::with_capacity(found.tokens.len());
         for token in &found.tokens {
-            let style = *known.entry((token.kind, token.modifiers)).or_insert_with(|| {
-                let kind = found.legend.type_name(token.kind)?;
-                let modifiers: Vec<&str> = found.legend.modifier_names(token.modifiers).collect();
-                let style = scheme.style_for(kind, &modifiers)?;
-                styles.push(style);
-                u16::try_from(styles.len() - 1).ok()
-            });
+            let style = *known
+                .entry((token.kind, token.modifiers))
+                .or_insert_with(|| {
+                    let kind = found.legend.type_name(token.kind)?;
+                    let modifiers: Vec<&str> = found
+                        .legend
+                        .modifier_names(token.modifiers)
+                        .collect();
+                    let style = scheme.style_for(kind, &modifiers)?;
+                    styles.push(style);
+                    u16::try_from(styles.len() - 1).ok()
+                });
             if let Some(style) = style {
-                tokens.push(Styled { start: token.range.start, end: token.range.end, style });
+                tokens.push(Styled {
+                    start: token.range.start,
+                    end: token.range.end,
+                    style,
+                });
             }
         }
-        Self { mode, text: found.text.clone(), tokens, styles }
+        Self {
+            mode,
+            text: found.text.clone(),
+            tokens,
+            styles,
+        }
     }
 
     /// The tokens as they are in `text`, which is the text they are of after the edits that were made: those after an edit are
@@ -77,7 +91,11 @@ impl Resolved {
                 } else if token.start >= old.end {
                     // Adding and taking away are of whole bytes, and a byte is never taken from before the start of the edit.
                     let start = token.start + new.len() - old.len();
-                    Some(Styled { start, end: start + (token.end - token.start), ..*token })
+                    Some(Styled {
+                        start,
+                        end: start + (token.end - token.start),
+                        ..*token
+                    })
                 } else {
                     None
                 }
@@ -112,7 +130,12 @@ fn overlaid(base: Vec<StyledRange>, tokens: &[Styled], styles: &[SpanStyle]) -> 
             merged.push(StyledRange::new(from..run.range.end, run.style.clone()));
         }
     }
-    merged.extend(tokens.iter().map(|token| StyledRange::new(token.start..token.end, styles[usize::from(token.style)].clone())));
+    merged.extend(tokens.iter().map(|token| {
+        StyledRange::new(
+            token.start..token.end,
+            styles[usize::from(token.style)].clone(),
+        )
+    }));
     merged.sort_by_key(|run| run.range.start);
     merged
 }
@@ -158,7 +181,13 @@ impl Semantic {
     pub const MOST_RETRIES: u32 = 120;
 
     /// Gives the cell the pane it is for, or tells it what changed of it. A new mode makes the styles again.
-    pub fn attach(self: &Rc<Self>, lsp: Lsp, path: PathBuf, controller: TextEditingController, mode: ThemeMode) {
+    pub fn attach(
+        self: &Rc<Self>,
+        lsp: Lsp,
+        path: PathBuf,
+        controller: TextEditingController,
+        mode: ThemeMode,
+    ) {
         if !self.listening.replace(true) {
             // The server says when it has found out what the names it did not know are: the tokens are asked for then.
             let this: Weak<Self> = Rc::downgrade(self);
@@ -170,7 +199,12 @@ impl Semantic {
                 None => false,
             }));
         }
-        *self.context.borrow_mut() = Some(Context { lsp, path, controller, mode });
+        *self.context.borrow_mut() = Some(Context {
+            lsp,
+            path,
+            controller,
+            mode,
+        });
     }
 
     /// Adds what is called to draw the pane again when the tokens change, which says whether the pane is still there.
@@ -193,10 +227,13 @@ impl Semantic {
 
     /// Whether the server is ready and has nothing it is busy with.
     fn server_idle(&self) -> bool {
-        self.context.borrow().as_ref().is_some_and(|context| {
-            let summary = context.lsp.summary(&context.path);
-            summary.status == Some(Status::Ready) && summary.progress.is_none()
-        })
+        self.context
+            .borrow()
+            .as_ref()
+            .is_some_and(|context| {
+                let summary = context.lsp.summary(&context.path);
+                summary.status == Some(Status::Ready) && summary.progress.is_none()
+            })
     }
 
     fn schedule_load(self: &Rc<Self>, delay: Duration) {
@@ -230,7 +267,12 @@ impl Semantic {
     /// Asks the server for the tokens of the file now. What it said is kept, and the pane is drawn again if it is not what there was;
     /// where it could not say, what was kept stays.
     fn refresh(self: &Rc<Self>) {
-        let Some((lsp, path)) = self.context.borrow().as_ref().map(|context| (context.lsp.clone(), context.path.clone())) else {
+        let Some((lsp, path)) = self
+            .context
+            .borrow()
+            .as_ref()
+            .map(|context| (context.lsp.clone(), context.path.clone()))
+        else {
             return;
         };
         if let Some(old) = self.request.take() {
@@ -246,7 +288,13 @@ impl Semantic {
             if let Some(found) = found {
                 // The server is asked again while it loads and says the same: the pane is drawn again, which highlights its text, for
                 // what is new. A text that is another with the same tokens is not new either: the tokens that are kept are moved over it.
-                let same = this.loaded.borrow().as_ref().is_some_and(|old| old.tokens == found.tokens && old.text.diff(&found.text).is_none());
+                let same = this
+                    .loaded
+                    .borrow()
+                    .as_ref()
+                    .is_some_and(|old| {
+                        old.tokens == found.tokens && old.text.diff(&found.text).is_none()
+                    });
                 if !same {
                     *this.loaded.borrow_mut() = Some(found);
                     *this.resolved.borrow_mut() = None;
@@ -291,7 +339,12 @@ impl Semantic {
     }
 
     /// What the grammar says of `range` of `text`, with the tokens over it. Left as it is until the server has said some.
-    pub fn overlay(&self, base: Vec<StyledRange>, text: &TextSnapshot, range: Range<usize>) -> Vec<StyledRange> {
+    pub fn overlay(
+        &self,
+        base: Vec<StyledRange>,
+        text: &TextSnapshot,
+        range: Range<usize>,
+    ) -> Vec<StyledRange> {
         let Some((tokens, resolved)) = self.tokens_in(text) else {
             return base;
         };

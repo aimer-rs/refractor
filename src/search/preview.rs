@@ -40,7 +40,12 @@ impl Preview {
         };
         let (first, lines) = window(path, line)?;
         let focus = line.filter(|line| (first..first + lines.len()).contains(line));
-        Some(Self { path: path.clone(), first, lines, focus })
+        Some(Self {
+            path: path.clone(),
+            first,
+            lines,
+            focus,
+        })
     }
 }
 

@@ -28,11 +28,13 @@ pub struct Lens {
 impl Lens {
     /// What the count of usages says: "27 usages", "1 usage" or "no usages". None where they were not counted.
     pub fn usages_caption(&self) -> Option<String> {
-        self.usages.as_ref().map(|places| match places.len() {
-            0 => "no usages".to_owned(),
-            1 => "1 usage".to_owned(),
-            count => format!("{count} usages"),
-        })
+        self.usages
+            .as_ref()
+            .map(|places| match places.len() {
+                0 => "no usages".to_owned(),
+                1 => "1 usage".to_owned(),
+                count => format!("{count} usages"),
+            })
     }
 
     /// What the count of implementations says: "1 implementation" or "3 implementations". None where there were none, or they
@@ -52,7 +54,10 @@ fn group(mut found: Vec<(usize, LensKind, Vec<Place>)>) -> Vec<Lens> {
     let mut lenses: Vec<Lens> = Vec::new();
     for (at, kind, places) in found {
         if lenses.last().is_none_or(|last| last.at != at) {
-            lenses.push(Lens { at, ..Lens::default() });
+            lenses.push(Lens {
+                at,
+                ..Lens::default()
+            });
         }
         let last = lenses.last_mut().expect("one was just made");
         match kind {
@@ -171,7 +176,10 @@ impl Loading {
             state.listing = None;
             match reply {
                 Some(reply) => {
-                    state.queue = protocol::unresolved_lenses(&reply).into_iter().take(MOST).collect();
+                    state.queue = protocol::unresolved_lenses(&reply)
+                        .into_iter()
+                        .take(MOST)
+                        .collect();
                 }
                 None => {
                     // The server could not say: what there was is kept, and nothing is given.
@@ -239,7 +247,9 @@ impl Loading {
             }
             if let Some(resolved) = reply.as_ref().and_then(protocol::resolved_lens) {
                 let at = state.lsp.byte_of(&state.text, resolved.at);
-                state.found.push((at, resolved.kind, resolved.places));
+                state
+                    .found
+                    .push((at, resolved.kind, resolved.places));
             }
         }
         Self::pump(this);

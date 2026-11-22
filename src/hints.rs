@@ -70,12 +70,27 @@ impl Hints {
     pub const MOST: usize = 3000;
 
     /// Gives the cell the pane it is for, or tells it what changed of it. A new color makes the notes again.
-    pub fn attach(&self, lsp: Lsp, path: PathBuf, controller: TextEditingController, colors: HintColors) {
-        let recolored = self.context.borrow().as_ref().is_some_and(|context| context.colors != colors);
+    pub fn attach(
+        &self,
+        lsp: Lsp,
+        path: PathBuf,
+        controller: TextEditingController,
+        colors: HintColors,
+    ) {
+        let recolored = self
+            .context
+            .borrow()
+            .as_ref()
+            .is_some_and(|context| context.colors != colors);
         if recolored {
             *self.built.borrow_mut() = None;
         }
-        *self.context.borrow_mut() = Some(Context { lsp, path, controller, colors });
+        *self.context.borrow_mut() = Some(Context {
+            lsp,
+            path,
+            controller,
+            colors,
+        });
     }
 
     /// Adds what is called to draw the pane again when the hints change, which says whether the pane is still there.
@@ -98,10 +113,13 @@ impl Hints {
 
     /// Whether the server is ready and has nothing it is busy with.
     fn server_idle(&self) -> bool {
-        self.context.borrow().as_ref().is_some_and(|context| {
-            let summary = context.lsp.summary(&context.path);
-            summary.status == Some(Status::Ready) && summary.progress.is_none()
-        })
+        self.context
+            .borrow()
+            .as_ref()
+            .is_some_and(|context| {
+                let summary = context.lsp.summary(&context.path);
+                summary.status == Some(Status::Ready) && summary.progress.is_none()
+            })
     }
 
     fn schedule_load(self: &Rc<Self>, delay: Duration) {
@@ -135,12 +153,13 @@ impl Hints {
     /// Asks the server for the hints of the whole file now. What it said is kept, and the pane is drawn again; where it could not
     /// say, what was kept stays.
     fn refresh(self: &Rc<Self>) {
-        let Some((lsp, path, controller)) = self
-            .context
-            .borrow()
-            .as_ref()
-            .map(|context| (context.lsp.clone(), context.path.clone(), context.controller.clone()))
-        else {
+        let Some((lsp, path, controller)) = self.context.borrow().as_ref().map(|context| {
+            (
+                context.lsp.clone(),
+                context.path.clone(),
+                context.controller.clone(),
+            )
+        }) else {
             return;
         };
         if let Some(old) = self.request.take() {

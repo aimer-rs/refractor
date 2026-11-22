@@ -65,16 +65,31 @@ impl StatelessWidget for SettingsPage {
         );
         let save_store = store.clone();
         let save_way = Choice::new(
-            AutoSave::ALL.iter().map(|way| way.label()).collect(),
-            AutoSave::ALL.iter().position(|candidate| *candidate == auto_save).unwrap_or(0),
-            Rc::new(move |index| change(&save_store, |settings| settings.set_auto_save(AutoSave::ALL[index]))),
+            AutoSave::ALL
+                .iter()
+                .map(|way| way.label())
+                .collect(),
+            AutoSave::ALL
+                .iter()
+                .position(|candidate| *candidate == auto_save)
+                .unwrap_or(0),
+            Rc::new(move |index| {
+                change(&save_store, |settings| {
+                    settings.set_auto_save(AutoSave::ALL[index])
+                })
+            }),
         );
         let delay_store = store.clone();
         let save_delay = Stepper::new(
             auto_save_delay as i64,
-            *Settings::AUTO_SAVE_DELAYS_MS.start() as i64..=*Settings::AUTO_SAVE_DELAYS_MS.end() as i64,
+            *Settings::AUTO_SAVE_DELAYS_MS.start() as i64
+                ..=*Settings::AUTO_SAVE_DELAYS_MS.end() as i64,
             "ms",
-            Rc::new(move |delay| change(&delay_store, |settings| settings.set_auto_save_delay_ms(delay as u64))),
+            Rc::new(move |delay| {
+                change(&delay_store, |settings| {
+                    settings.set_auto_save_delay_ms(delay as u64)
+                })
+            }),
         )
         .step(100);
         let theme_store = store;

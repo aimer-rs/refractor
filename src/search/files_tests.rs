@@ -9,7 +9,9 @@ fn index(dir: &Scratch) -> FileIndex {
 }
 
 fn names(hits: &[FileHit]) -> Vec<&str> {
-    hits.iter().map(|hit| hit.name.as_str()).collect()
+    hits.iter()
+        .map(|hit| hit.name.as_str())
+        .collect()
 }
 
 #[test]
@@ -25,7 +27,10 @@ fn it_lists_the_files_and_not_what_the_ignore_files_leave_out() {
     assert_eq!(index.len(), 2, "{index:?}");
     let hits = index.find(&Pattern::new(".rs"), 10);
     assert_eq!(hits.len(), 2);
-    assert!(hits.iter().all(|hit| hit.path.starts_with(dir.path())));
+    assert!(
+        hits.iter()
+            .all(|hit| hit.path.starts_with(dir.path()))
+    );
 }
 
 #[test]
@@ -58,7 +63,10 @@ fn the_better_name_comes_first() {
     dir.file("b/request.rs", "");
     dir.file("c/my_request.rs", "");
     let hits = index(&dir).find(&Pattern::new("request"), 10);
-    assert_eq!(names(&hits), ["request.rs", "request_ext.rs", "my_request.rs"]);
+    assert_eq!(
+        names(&hits),
+        ["request.rs", "request_ext.rs", "my_request.rs"]
+    );
 }
 
 #[test]
@@ -97,8 +105,14 @@ fn the_index_stops_at_its_limit_and_says_so() {
 fn a_cancelled_index_is_empty_and_a_missing_folder_has_no_files() {
     let dir = Scratch::new("files-cancel");
     dir.file("a.rs", "");
-    assert_eq!(FileIndex::build(dir.path(), 10, &AtomicBool::new(true)).len(), 0);
-    assert_eq!(FileIndex::build(&dir.path().join("gone"), 10, &AtomicBool::new(false)).len(), 0);
+    assert_eq!(
+        FileIndex::build(dir.path(), 10, &AtomicBool::new(true)).len(),
+        0
+    );
+    assert_eq!(
+        FileIndex::build(&dir.path().join("gone"), 10, &AtomicBool::new(false)).len(),
+        0
+    );
 }
 
 #[test]
@@ -107,4 +121,38 @@ fn names_that_are_not_ascii_are_found() {
     dir.file("café.txt", "");
     let hits = index(&dir).find(&Pattern::new("CAF"), 10);
     assert_eq!(names(&hits), ["café.txt"]);
+}
+
+#[test]
+fn a_line_and_a_column_are_split_off_the_path() {
+    use super::split_position;
+    let path = "src/screen/editor/problem_section.rs";
+    assert_eq!(
+        split_position(&format!("{path}:109")),
+        (path, Some((109, 0)))
+    );
+    assert_eq!(
+        split_position(&format!("{path}:109:5")),
+        (path, Some((109, 4)))
+    );
+    assert_eq!(
+        split_position(&format!("{path}:109:0")),
+        (path, Some((109, 0)))
+    );
+    assert_eq!(split_position(&format!("{path}:0")), (path, Some((1, 0))));
+    assert_eq!(
+        split_position(&format!("{path}:109 ")),
+        (path, Some((109, 0)))
+    );
+}
+
+#[test]
+fn what_is_not_a_position_is_left_as_typed() {
+    use super::split_position;
+    assert_eq!(split_position("main.rs"), ("main.rs", None));
+    assert_eq!(split_position("main.rs:"), ("main.rs:", None));
+    assert_eq!(split_position("main.rs:ab"), ("main.rs:ab", None));
+    assert_eq!(split_position(":12"), (":12", None));
+    assert_eq!(split_position(""), ("", None));
+    assert_eq!(split_position("日本:3"), ("日本", Some((3, 0))));
 }

@@ -104,18 +104,23 @@ impl StatelessWidget for Badge {
                     .background_color(color.with_alpha(0.08))
                     .border_radius(2)
                     .border(BoxBorder::all(
-                        BorderSlice::new().color(color.with_alpha(0.75)).style(BorderStyle::Solid).stroke(1.0),
+                        BorderSlice::new()
+                            .color(color.with_alpha(0.75))
+                            .style(BorderStyle::Solid)
+                            .stroke(1.0),
                     )),
             )
             .child(
                 Center::new().box_child(
-                    Text::new(glyph.text).text_align(TextAlign::MidCenter).text_style(
-                        TextStyle::new()
-                            .font_family(fonts::ui_family())
-                            .font_size(if glyph.text.len() > 1 { 8 } else { 10 })
-                            .font_weight(aimer::FontWeight::Bold)
-                            .color(color),
-                    ),
+                    Text::new(glyph.text)
+                        .text_align(TextAlign::MidCenter)
+                        .text_style(
+                            TextStyle::new()
+                                .font_family(fonts::ui_family())
+                                .font_size(if glyph.text.len() > 1 { 8 } else { 10 })
+                                .font_weight(aimer::FontWeight::Bold)
+                                .color(color),
+                        ),
                 ),
             )
     }

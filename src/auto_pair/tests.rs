@@ -406,7 +406,11 @@ fn a_closing_angle_bracket_that_is_there_is_stepped_over_only_for_one_that_was_o
     );
     assert_eq!(typed_at("x =|>", ">"), None, "nor is the arrow of an arm");
     assert_eq!(typed_at("if a|>", ">"), None, "nothing was opened");
-    assert_eq!(typed_at("let v: Vec<u8|", ">"), None, "nothing is there to step over");
+    assert_eq!(
+        typed_at("let v: Vec<u8|", ">"),
+        None,
+        "nothing is there to step over"
+    );
     assert_eq!(
         typed_at("fn f<\n    T|>", ">"),
         None,
@@ -434,7 +438,16 @@ fn an_angle_bracket_over_a_selection_replaces_it_as_ever() {
 
 #[test]
 fn a_prefix_of_a_string_is_closed_and_a_word_that_ends_in_one_is_not() {
-    for before in ["let s = r|", "b|", "br|", "c|", "cr|", "f(r|)", "r|", "x = br|"] {
+    for before in [
+        "let s = r|",
+        "b|",
+        "br|",
+        "c|",
+        "cr|",
+        "f(r|)",
+        "r|",
+        "x = br|",
+    ] {
         assert_eq!(typed_at(before, "\""), pair('"', '"'), "{before:?}");
     }
     for before in ["bar|", "var|", "format_r|", "xbr|", "r2|", "\u{e9}r|"] {
@@ -450,8 +463,16 @@ fn a_raw_string_is_closed_with_as_many_marks_as_it_was_opened_with() {
     assert_eq!(typed_at("let s = br#|", "\""), raw(1));
     assert_eq!(typed_at("let s = cr###|", "\""), raw(3));
     assert_eq!(typed_at("f(r#|)", "\""), raw(1));
-    assert_eq!(typed_at("let s = ar#|", "\""), None, "a word, and not a raw string");
-    assert_eq!(typed_at("let s = b#|", "\""), None, "a byte string is not raw");
+    assert_eq!(
+        typed_at("let s = ar#|", "\""),
+        None,
+        "a word, and not a raw string"
+    );
+    assert_eq!(
+        typed_at("let s = b#|", "\""),
+        None,
+        "a byte string is not raw"
+    );
     assert_eq!(typed_at("let s = #|", "\""), None);
     assert_eq!(typed_at("let s = x#|", "\""), None);
     assert_eq!(typed_at("r#|word", "\""), None, "before a word");
@@ -464,7 +485,11 @@ fn the_end_of_a_raw_string_is_stepped_over_a_mark_at_a_time_and_a_quote_in_it_is
     assert_eq!(typed_at("let s = r#\"abc\"|#", "#"), over, "the mark");
     assert_eq!(typed_at("let s = r##\"abc\"|##", "#"), over);
     assert_eq!(typed_at("let s = r##\"abc\"#|#", "#"), over);
-    assert_eq!(typed_at("let s = r\"abc|\"", "\""), over, "a raw string with no marks");
+    assert_eq!(
+        typed_at("let s = r\"abc|\"", "\""),
+        over,
+        "a raw string with no marks"
+    );
     assert_eq!(
         typed_at("let s = r\"abc\\|\"", "\""),
         over,
@@ -490,9 +515,21 @@ fn the_end_of_a_raw_string_is_stepped_over_a_mark_at_a_time_and_a_quote_in_it_is
         None,
         "no mark after the caret is a mark to step over"
     );
-    assert_eq!(typed_at("let s = r#\"abc|#", "#"), None, "a mark in the text");
-    assert_eq!(typed_at("let a = r#\"x\"#; let b = |", "\""), pair('"', '"'), "a string that was closed");
-    assert_eq!(typed_at("#|#", "#"), None, "marks outside a string are typed");
+    assert_eq!(
+        typed_at("let s = r#\"abc|#", "#"),
+        None,
+        "a mark in the text"
+    );
+    assert_eq!(
+        typed_at("let a = r#\"x\"#; let b = |", "\""),
+        pair('"', '"'),
+        "a string that was closed"
+    );
+    assert_eq!(
+        typed_at("#|#", "#"),
+        None,
+        "marks outside a string are typed"
+    );
     assert_eq!(
         typed_at("let s = \"a\"|#", "#"),
         None,

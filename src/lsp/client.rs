@@ -190,7 +190,12 @@ impl Lsp {
         let defining = self.shared.defining.borrow_mut().take();
         let hovering = self.shared.hovering.borrow_mut().take();
         let resolving = self.shared.resolving.borrow_mut().take();
-        let asking: Vec<_> = self.shared.asking.borrow_mut().drain().collect();
+        let asking: Vec<_> = self
+            .shared
+            .asking
+            .borrow_mut()
+            .drain()
+            .collect();
         if let Some((_, done)) = waiting {
             done(None);
         }
@@ -215,7 +220,12 @@ impl Lsp {
     /// Tells the server that the open file `path` was saved: the text it was changed to is told first, and then the save, which makes
     /// a server such as rust-analyzer check the project. Nothing is told of a file that is not open.
     pub fn saved(&self, path: &Path) {
-        if !self.shared.listeners.borrow().contains_key(path) {
+        if !self
+            .shared
+            .listeners
+            .borrow()
+            .contains_key(path)
+        {
             return;
         }
         self.shared.core.borrow_mut().saved(path);
@@ -339,7 +349,11 @@ impl Lsp {
         params: serde_json::Value,
         done: impl FnOnce(Option<serde_json::Value>) + 'static,
     ) -> Option<i64> {
-        let id = self.shared.core.borrow_mut().ask(method, params);
+        let id = self
+            .shared
+            .core
+            .borrow_mut()
+            .ask(method, params);
         match id {
             Some(id) => {
                 self.shared
@@ -353,8 +367,15 @@ impl Lsp {
     }
 
     /// Where the byte `byte` of `text` is, counted as the server counts.
-    pub(crate) fn position_of(&self, text: &aimer::input::input::TextSnapshot, byte: usize) -> Position {
-        self.shared.core.borrow().position_of(text, byte)
+    pub(crate) fn position_of(
+        &self,
+        text: &aimer::input::input::TextSnapshot,
+        byte: usize,
+    ) -> Position {
+        self.shared
+            .core
+            .borrow()
+            .position_of(text, byte)
     }
 
     /// What the server calls the kinds and the modifiers of its tokens, if it has the tokens of a file to give.
@@ -362,8 +383,17 @@ impl Lsp {
         self.shared.core.borrow().legend()
     }
 
-    pub(super) fn core_diagnostics(&self, path: &Path) -> Option<(Vec<super::session::Diagnostic>, aimer::input::input::TextSnapshot)> {
-        self.shared.core.borrow().current_diagnostics(path)
+    pub(super) fn core_diagnostics(
+        &self,
+        path: &Path,
+    ) -> Option<(
+        Vec<super::session::Diagnostic>,
+        aimer::input::input::TextSnapshot,
+    )> {
+        self.shared
+            .core
+            .borrow()
+            .current_diagnostics(path)
     }
 
     pub(super) fn add_change_hook(&self, hook: Rc<dyn Fn() -> bool>) {
@@ -371,7 +401,10 @@ impl Lsp {
     }
 
     pub(super) fn add_semantic_refresh(&self, hook: Rc<dyn Fn() -> bool>) {
-        self.shared.semantic_refresh.borrow_mut().push(hook);
+        self.shared
+            .semantic_refresh
+            .borrow_mut()
+            .push(hook);
     }
 
     /// Whether the server is ready and has hints to give.
@@ -382,7 +415,13 @@ impl Lsp {
     /// Says that the answer to the request `id` made by [`ask`](Self::ask) is not wanted: `done` is not called, and the server
     /// is told, which lets it stop working it out.
     pub fn cancel(&self, id: i64) {
-        if self.shared.asking.borrow_mut().remove(&id).is_some() {
+        if self
+            .shared
+            .asking
+            .borrow_mut()
+            .remove(&id)
+            .is_some()
+        {
             self.shared.core.borrow_mut().cancel(id);
         }
     }
@@ -463,7 +502,9 @@ impl Shared {
                 let hooks: Vec<_> = this.semantic_refresh.borrow().clone();
                 let alive: Vec<bool> = hooks.iter().map(|hook| hook()).collect();
                 let mut kept = alive.iter();
-                this.semantic_refresh.borrow_mut().retain(|_| kept.next().copied().unwrap_or(true));
+                this.semantic_refresh
+                    .borrow_mut()
+                    .retain(|_| kept.next().copied().unwrap_or(true));
             }
             for (id, reply) in replies {
                 // Not while anything is borrowed: what is called may ask again.
@@ -544,7 +585,9 @@ impl Shared {
                 if !hooks.is_empty() {
                     let alive: Vec<bool> = hooks.iter().map(|hook| hook()).collect();
                     let mut kept = alive.iter();
-                    this.change_hooks.borrow_mut().retain(|_| kept.next().copied().unwrap_or(true));
+                    this.change_hooks
+                        .borrow_mut()
+                        .retain(|_| kept.next().copied().unwrap_or(true));
                 }
             }
             let over = this
@@ -695,10 +738,7 @@ mod tests {
     }
 
     /// A server for each folder it is asked to run on, from `fakes` in turn, and the folders it was asked for.
-    fn lsp_on_each_root(
-        fakes: Vec<Fake>,
-        first: &str,
-    ) -> (Lsp, Rc<RefCell<Vec<PathBuf>>>) {
+    fn lsp_on_each_root(fakes: Vec<Fake>, first: &str) -> (Lsp, Rc<RefCell<Vec<PathBuf>>>) {
         let roots: Rc<RefCell<Vec<PathBuf>>> = Rc::default();
         let (noted, fakes) = (
             Rc::clone(&roots),
@@ -712,7 +752,10 @@ mod tests {
                 .expect("a fake for each start");
             Ok(Box::new(fake) as Box<dyn Link>)
         });
-        (Lsp::with_starter(PathBuf::from(first), starter, false), roots)
+        (
+            Lsp::with_starter(PathBuf::from(first), starter, false),
+            roots,
+        )
     }
 
     #[test]
@@ -733,7 +776,8 @@ mod tests {
         let got: Rc<RefCell<Vec<Option<usize>>>> = Rc::default();
         let into = Rc::clone(&got);
         lsp.complete(Path::new(FILE), move |answer| {
-            into.borrow_mut().push(answer.map(|a| a.items.len()))
+            into.borrow_mut()
+                .push(answer.map(|a| a.items.len()))
         });
         assert_eq!(*roots.borrow(), [PathBuf::from("/home")]);
 
@@ -745,7 +789,11 @@ mod tests {
             [PathBuf::from("/home"), PathBuf::from("/project")],
             "run again on the folder that was chosen"
         );
-        assert_eq!(*got.borrow(), vec![None], "the old server's answer is not coming");
+        assert_eq!(
+            *got.borrow(),
+            vec![None],
+            "the old server's answer is not coming"
+        );
         let told = new.methods();
         assert_eq!(
             told.iter()
@@ -756,10 +804,11 @@ mod tests {
         assert_eq!(told[0].1["rootUri"], json!("file:///project"));
 
         // A word from the old server is not heard: its mailbox is not the one in use.
-        old.mailbox.push(Event::Message(Incoming::Notification {
-            method: "$/progress".into(),
-            params: json!({}),
-        }));
+        old.mailbox
+            .push(Event::Message(Incoming::Notification {
+                method: "$/progress".into(),
+                params: json!({}),
+            }));
         settle(&venus);
         let _ = Venus::uninstall();
     }
@@ -874,24 +923,32 @@ mod tests {
     }
 
     #[test]
-    fn a_saved_file_is_told_after_the_edits_that_were_made_before_it_and_one_that_is_not_open_is_not_told() {
+    fn a_saved_file_is_told_after_the_edits_that_were_made_before_it_and_one_that_is_not_open_is_not_told()
+     {
         let venus = installed();
         let fake = Fake::new();
         let lsp = lsp_with(&fake);
         let controller = TextEditingController::with_text("a\n");
         lsp.open(Path::new(FILE), &controller, Rc::new(|| {}));
         settle(&venus);
-        fake.mailbox.push(Event::Message(Incoming::Response {
-            id: 1,
-            result: Ok(json!({"capabilities": {"textDocumentSync": 2, "positionEncoding": "utf-8"}})),
-        }));
+        fake.mailbox
+            .push(Event::Message(Incoming::Response {
+                id: 1,
+                result: Ok(
+                    json!({"capabilities": {"textDocumentSync": 2, "positionEncoding": "utf-8"}}),
+                ),
+            }));
         settle(&venus);
         let _ = fake.methods();
         // The text was changed and not yet told, and the file is saved: the server is told of the text, and then of the save, so that
         // what it checks is what is on disk.
         controller.set_text("b\n");
         lsp.saved(Path::new(FILE));
-        let told: Vec<String> = fake.methods().into_iter().map(|(method, _)| method).collect();
+        let told: Vec<String> = fake
+            .methods()
+            .into_iter()
+            .map(|(method, _)| method)
+            .collect();
         assert_eq!(told, ["textDocument/didChange", "textDocument/didSave"]);
         lsp.saved(Path::new("/project/not_open.rs"));
         assert!(fake.methods().is_empty());

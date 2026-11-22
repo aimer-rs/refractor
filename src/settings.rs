@@ -138,7 +138,10 @@ impl Settings {
 
     /// Sets the delay of the save, brought into [`Self::AUTO_SAVE_DELAYS_MS`].
     pub fn set_auto_save_delay_ms(&mut self, delay: u64) {
-        self.auto_save_delay_ms = delay.clamp(*Self::AUTO_SAVE_DELAYS_MS.start(), *Self::AUTO_SAVE_DELAYS_MS.end());
+        self.auto_save_delay_ms = delay.clamp(
+            *Self::AUTO_SAVE_DELAYS_MS.start(),
+            *Self::AUTO_SAVE_DELAYS_MS.end(),
+        );
     }
 
     /// Sets the size of code, brought into [`Self::FONT_SIZES`].
@@ -309,43 +312,82 @@ mod tests {
     fn a_file_is_saved_only_when_the_user_says_so_until_the_user_says_otherwise() {
         let settings = Settings::default();
         assert_eq!(settings.auto_save(), AutoSave::Off);
-        assert_eq!(settings.auto_save_delay(), std::time::Duration::from_millis(1000));
+        assert_eq!(
+            settings.auto_save_delay(),
+            std::time::Duration::from_millis(1000)
+        );
     }
 
     #[test]
-    fn the_ways_to_save_by_itself_are_off_after_a_delay_and_when_the_focus_is_lost_and_are_written_as_words() {
-        assert_eq!(AutoSave::ALL, [AutoSave::Off, AutoSave::Delay, AutoSave::FocusLost]);
-        assert_eq!(AutoSave::ALL.map(AutoSave::label), ["Off", "After a delay", "When focus is lost"]);
-        for (mode, word) in [(AutoSave::Off, "off"), (AutoSave::Delay, "delay"), (AutoSave::FocusLost, "focus-lost")] {
+    fn the_ways_to_save_by_itself_are_off_after_a_delay_and_when_the_focus_is_lost_and_are_written_as_words()
+     {
+        assert_eq!(
+            AutoSave::ALL,
+            [AutoSave::Off, AutoSave::Delay, AutoSave::FocusLost]
+        );
+        assert_eq!(
+            AutoSave::ALL.map(AutoSave::label),
+            ["Off", "After a delay", "When focus is lost"]
+        );
+        for (mode, word) in [
+            (AutoSave::Off, "off"),
+            (AutoSave::Delay, "delay"),
+            (AutoSave::FocusLost, "focus-lost"),
+        ] {
             let mut settings = Settings::default();
             settings.set_auto_save(mode);
             let text = settings.to_toml();
             assert!(text.contains(&format!("auto_save = \"{word}\"")), "{text}");
             assert_eq!(Settings::from_toml(&text).unwrap().auto_save(), mode);
         }
-        assert!(Settings::from_toml("auto_save = \"always\"").is_err(), "a way that there is not");
+        assert!(
+            Settings::from_toml("auto_save = \"always\"").is_err(),
+            "a way that there is not"
+        );
     }
 
     #[test]
-    fn the_delay_of_the_save_is_brought_into_the_range_the_editor_offers_and_is_kept_in_milliseconds() {
+    fn the_delay_of_the_save_is_brought_into_the_range_the_editor_offers_and_is_kept_in_milliseconds()
+     {
         let mut settings = Settings::default();
         settings.set_auto_save_delay_ms(0);
-        assert_eq!(settings.auto_save_delay_ms(), *Settings::AUTO_SAVE_DELAYS_MS.start());
+        assert_eq!(
+            settings.auto_save_delay_ms(),
+            *Settings::AUTO_SAVE_DELAYS_MS.start()
+        );
         settings.set_auto_save_delay_ms(u64::MAX);
-        assert_eq!(settings.auto_save_delay_ms(), *Settings::AUTO_SAVE_DELAYS_MS.end());
+        assert_eq!(
+            settings.auto_save_delay_ms(),
+            *Settings::AUTO_SAVE_DELAYS_MS.end()
+        );
         settings.set_auto_save_delay_ms(2500);
-        assert_eq!(settings.auto_save_delay(), std::time::Duration::from_millis(2500));
-        assert!(settings.to_toml().contains("auto_save_delay_ms = 2500"));
+        assert_eq!(
+            settings.auto_save_delay(),
+            std::time::Duration::from_millis(2500)
+        );
+        assert!(
+            settings
+                .to_toml()
+                .contains("auto_save_delay_ms = 2500")
+        );
         let read = Settings::from_toml("auto_save_delay_ms = 3\n").unwrap();
-        assert_eq!(read.auto_save_delay_ms(), *Settings::AUTO_SAVE_DELAYS_MS.start(), "a file that says less is brought into the range");
+        assert_eq!(
+            read.auto_save_delay_ms(),
+            *Settings::AUTO_SAVE_DELAYS_MS.start(),
+            "a file that says less is brought into the range"
+        );
         assert!(Settings::from_toml("auto_save_delay_ms = -5").is_err());
         assert!(Settings::from_toml("auto_save_delay_ms = \"soon\"").is_err());
     }
 
     #[test]
     fn a_file_from_before_there_was_a_way_to_save_by_itself_still_reads() {
-        let settings = Settings::from_toml("font_size = 14\ntab_spaces = 2\ntheme = \"light\"\n").expect("the old keys");
-        assert_eq!((settings.auto_save(), settings.auto_save_delay_ms()), (AutoSave::Off, Settings::DEFAULT_AUTO_SAVE_DELAY_MS));
+        let settings = Settings::from_toml("font_size = 14\ntab_spaces = 2\ntheme = \"light\"\n")
+            .expect("the old keys");
+        assert_eq!(
+            (settings.auto_save(), settings.auto_save_delay_ms()),
+            (AutoSave::Off, Settings::DEFAULT_AUTO_SAVE_DELAY_MS)
+        );
     }
 
     #[test]

@@ -14,7 +14,10 @@ use std::time::Duration;
 
 use aimer::Venus;
 
-use super::{Action, FileHit, FileIndex, Found, Hit, Parts, Pattern, Preview, Tab, Target, TextSearch};
+use super::files::split_position;
+use super::{
+    Action, FileHit, FileIndex, Found, Hit, Parts, Pattern, Preview, Tab, Target, TextSearch,
+};
 use crate::components::popup::Redraw;
 use crate::lsp::Lsp;
 
@@ -66,7 +69,10 @@ pub struct Search {
 impl Drop for Search {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
-        self.state.get_mut().cancel.store(true, Ordering::Relaxed);
+        self.state
+            .get_mut()
+            .cancel
+            .store(true, Ordering::Relaxed);
         if let Some(id) = self.state.get_mut().asking.take() {
             self.lsp.cancel(id);
         }
@@ -91,7 +97,10 @@ impl Search {
                 query: String::new(),
                 tab: Tab::All,
                 selected: 0,
-                parts: Parts { root: root.clone(), ..Parts::default() },
+                parts: Parts {
+                    root: root.clone(),
+                    ..Parts::default()
+                },
                 hits: Rc::default(),
                 generation: 0,
                 cancel: Arc::new(AtomicBool::new(false)),
@@ -268,9 +277,22 @@ impl Search {
             state.asked = false;
             state.server_note = false;
             state.selected = 0;
-            let pattern = Pattern::new(&state.query);
-            state.parts = Parts { root: state.parts.root.clone(), pattern: pattern.clone(), ..Parts::default() };
-            (state.generation, state.tab, state.query.clone(), pattern, state.asking.take())
+            let (typed, at) = split_position(&state.query);
+            let typed = typed.to_owned();
+            let pattern = Pattern::new(&typed);
+            state.parts = Parts {
+                root: state.parts.root.clone(),
+                pattern: pattern.clone(),
+                at,
+                ..Parts::default()
+            };
+            (
+                state.generation,
+                state.tab,
+                typed,
+                pattern,
+                state.asking.take(),
+            )
         };
         if let Some(id) = asking {
             self.lsp.cancel(id);
@@ -289,7 +311,13 @@ impl Search {
         if tab.wants_symbols() {
             self.ask_symbols(generation, &query);
         }
-        if tab.wants_text() && query.chars().filter(|c| !c.is_whitespace()).count() >= Limits::TEXT_LETTERS {
+        if tab.wants_text()
+            && query
+                .chars()
+                .filter(|c| !c.is_whitespace())
+                .count()
+                >= Limits::TEXT_LETTERS
+        {
             self.read_text(generation, query);
         }
     }
@@ -299,7 +327,9 @@ impl Search {
         {
             let mut state = self.state.borrow_mut();
             state.hits = Rc::new(state.tab.combine(&state.parts));
-            state.selected = state.selected.min(state.hits.len().saturating_sub(1));
+            state.selected = state
+                .selected
+                .min(state.hits.len().saturating_sub(1));
             state.preview = None;
         }
         self.redraw.fire();
@@ -336,30 +366,54 @@ impl Search {
             let files = blocking
                 .spawn_blocking(move || index.find(&pattern, Limits::FILES))
                 .await;
-            Self::deliver(&this, generation, Some(files), |state, files: Vec<FileHit>| state.parts.files = files);
+            Self::deliver(
+                &this,
+                generation,
+                Some(files),
+                |state, files: Vec<FileHit>| state.parts.files = files,
+            );
         });
     }
 
-    fn deliver<T>(this: &Weak<Self>, generation: u64, found: Option<T>, apply: impl FnOnce(&mut State, T)) {
+    fn deliver<T>(
+        this: &Weak<Self>,
+        generation: u64,
+        found: Option<T>,
+        apply: impl FnOnce(&mut State, T),
+    ) {
         if let (Some(this), Some(found)) = (this.upgrade(), found) {
             this.arrived(generation, |state| apply(state, found));
         }
     }
 
+    /// The symbols that are defined in the folder: the server also knows those of the libraries it depends on, which are
+    /// in the cargo registry or the toolchain, and are not what is looked for in the project.
+    fn inside(
+        root: &std::path::Path,
+        mut symbols: Vec<crate::lsp::Symbol>,
+    ) -> Vec<crate::lsp::Symbol> {
+        symbols.retain(|symbol| symbol.place.path.starts_with(root));
+        symbols
+    }
+
     fn ask_symbols(self: &Rc<Self>, generation: u64, query: &str) {
         self.state.borrow_mut().asked = true;
         let this = Rc::downgrade(self);
-        let id = self.lsp.workspace_symbols(query, move |answer| {
-            let Some(this) = this.upgrade() else { return };
-            this.arrived(generation, |state| {
-                state.asked = false;
-                state.asking = None;
-                match answer {
-                    Some(symbols) => state.parts.symbols = symbols,
-                    None => state.server_note = true,
-                }
+        let id = self
+            .lsp
+            .workspace_symbols(query, move |answer| {
+                let Some(this) = this.upgrade() else { return };
+                this.arrived(generation, |state| {
+                    state.asked = false;
+                    state.asking = None;
+                    match answer {
+                        Some(symbols) => {
+                            state.parts.symbols = Self::inside(&state.parts.root, symbols)
+                        }
+                        None => state.server_note = true,
+                    }
+                });
             });
-        });
         let mut state = self.state.borrow_mut();
         // The answer may have come already, when the server could not be asked.
         if state.generation == generation && state.asked {
@@ -382,12 +436,18 @@ impl Search {
             });
             return;
         };
-        let (this, blocking, paused) = (Rc::downgrade(self), venus.clone(), venus.sleep(Limits::TEXT_PAUSE));
+        let (this, blocking, paused) = (
+            Rc::downgrade(self),
+            venus.clone(),
+            venus.sleep(Limits::TEXT_PAUSE),
+        );
         venus.spawn(async move {
             // A runtime that has no timers answers at once.
             let _ = paused.await;
             // Typing went on in the pause: this is not what is wanted any more.
-            let Some(current) = this.upgrade() else { return };
+            let Some(current) = this.upgrade() else {
+                return;
+            };
             if current.state.borrow().generation != generation {
                 return;
             }

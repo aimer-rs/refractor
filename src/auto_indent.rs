@@ -173,7 +173,13 @@ impl AutoIndent {
     ///
     /// The ends of the selection stay with the text they were at. The start of a selection that begins at the start of a line stays
     /// there, so that what was put in is selected, and the next Tab goes on from it.
-    pub fn shift_lines(text: &TextSnapshot, anchor: usize, focus: usize, spaces: usize, outdent: bool) -> Option<Shifted> {
+    pub fn shift_lines(
+        text: &TextSnapshot,
+        anchor: usize,
+        focus: usize,
+        spaces: usize,
+        outdent: bool,
+    ) -> Option<Shifted> {
         let (start, end) = (anchor.min(focus), anchor.max(focus));
         if start == end {
             return None;
@@ -193,13 +199,24 @@ impl AutoIndent {
                 edits.push((line.start..line.start, level.clone()));
             }
         }
-        let (anchor, focus) = (Self::moved(anchor, &edits, false), Self::moved(focus, &edits, false));
-        Some(Shifted { edits, anchor, focus })
+        let (anchor, focus) = (
+            Self::moved(anchor, &edits, false),
+            Self::moved(focus, &edits, false),
+        );
+        Some(Shifted {
+            edits,
+            anchor,
+            focus,
+        })
     }
 
     /// The lines, without their line breaks, that the selection `start` to `end` touches. A line that the selection only reaches the
     /// start of, by ending there, is not one, unless it is the only line. A caret touches the line it is on.
-    pub(crate) fn touched_lines(text: &TextSnapshot, start: usize, end: usize) -> Vec<Range<usize>> {
+    pub(crate) fn touched_lines(
+        text: &TextSnapshot,
+        start: usize,
+        end: usize,
+    ) -> Vec<Range<usize>> {
         let first = text.byte_to_line(start);
         let mut last = text.byte_to_line(end);
         if last > first && end == text.line_range(last).start {
@@ -215,10 +232,17 @@ impl AutoIndent {
         let tabbed = lines.iter().any(|line| {
             line.clone()
                 .take(Self::MAX_INDENT)
-                .map_while(|at| text.byte_at(at).filter(|byte| matches!(byte, b' ' | b'\t')))
+                .map_while(|at| {
+                    text.byte_at(at)
+                        .filter(|byte| matches!(byte, b' ' | b'\t'))
+                })
                 .any(|byte| byte == b'\t')
         });
-        if tabbed { "\t".to_owned() } else { " ".repeat(spaces) }
+        if tabbed {
+            "\t".to_owned()
+        } else {
+            " ".repeat(spaces)
+        }
     }
 
     /// How many bytes at the start of `line` a level is: a tab, or the spaces there are, up to the width of a level.
@@ -242,14 +266,19 @@ impl AutoIndent {
     pub(crate) fn moved(at: usize, edits: &[(Range<usize>, String)], after_insert: bool) -> usize {
         let mut shift: isize = 0;
         for (range, text) in edits {
-            let past = if after_insert && range.is_empty() { range.start > at } else { range.start >= at };
+            let past = if after_insert && range.is_empty() {
+                range.start > at
+            } else {
+                range.start >= at
+            };
             if past {
                 break;
             }
             // How much of what is taken is before `at`: all of it, or as far as `at`.
             shift += text.len() as isize - (range.end.min(at) - range.start) as isize;
         }
-        at.checked_add_signed(shift).expect("an edit does not take more than there is before the place")
+        at.checked_add_signed(shift)
+            .expect("an edit does not take more than there is before the place")
     }
 
     /// Does what Tab does with a selection, or Shift+Tab where `outdent`, as one edit that one undo takes back, with the same text
@@ -257,7 +286,13 @@ impl AutoIndent {
     /// to take is the key's too, though nothing is changed.
     pub fn apply_shift(controller: &TextEditingController, spaces: usize, outdent: bool) -> bool {
         let selection = controller.value().selection();
-        let Some(shifted) = Self::shift_lines(&controller.snapshot(), selection.anchor(), selection.focus(), spaces, outdent) else {
+        let Some(shifted) = Self::shift_lines(
+            &controller.snapshot(),
+            selection.anchor(),
+            selection.focus(),
+            spaces,
+            outdent,
+        ) else {
             return false;
         };
         // Nothing to take is still the key's: it is not the field's to move focus with.
@@ -269,7 +304,10 @@ impl AutoIndent {
     /// that is returned lives. The framework moves focus to the one before on Shift+Tab, before the editor is asked, unless the focus
     /// owner holds the key: and a selection is the only time Shift+Tab is the editor's, to outdent it. With a caret it leaves the
     /// editor as it does from anything, so that the keyboard is not caught in it. Tab is the editor's already.
-    pub fn hold_tab_while_selected(focus: FocusNode, controller: TextEditingController) -> ControllerListener {
+    pub fn hold_tab_while_selected(
+        focus: FocusNode,
+        controller: TextEditingController,
+    ) -> ControllerListener {
         focus.set_holds_tab(!controller.value().selection().is_collapsed());
         let watched = controller.clone();
         controller.listen(move |_| focus.set_holds_tab(!watched.value().selection().is_collapsed()))

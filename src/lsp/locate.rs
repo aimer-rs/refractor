@@ -20,9 +20,11 @@ pub fn resolve(program: &str, path: Option<OsString>, home: Option<&Path>) -> Pa
         .flat_map(std::env::split_paths)
         .collect::<Vec<_>>();
     let system = SYSTEM_FOLDERS.iter().map(PathBuf::from);
-    let under_home = home
-        .into_iter()
-        .flat_map(|home| HOME_FOLDERS.iter().map(move |folder| home.join(folder)));
+    let under_home = home.into_iter().flat_map(|home| {
+        HOME_FOLDERS
+            .iter()
+            .map(move |folder| home.join(folder))
+    });
     let toolchains = home.into_iter().flat_map(rustup_toolchain_bins);
     from_path
         .into_iter()

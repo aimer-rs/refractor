@@ -167,14 +167,32 @@ mod tests {
     #[test]
     fn the_symbols_of_an_answer_are_in_the_order_given_with_what_cannot_be_gone_to_left_out() {
         let found = symbols(&answer());
-        let names: Vec<&str> = found.iter().map(|symbol| symbol.name.as_str()).collect();
+        let names: Vec<&str> = found
+            .iter()
+            .map(|symbol| symbol.name.as_str())
+            .collect();
         assert_eq!(names, ["RequestBuilder", "request", "Empty"]);
         let first = &found[0];
         assert_eq!(first.kind, SymbolKind::Struct);
         assert_eq!(first.container.as_deref(), Some("ureq::request"));
-        assert_eq!(first.place.path, std::path::PathBuf::from("/p/src/request.rs"));
-        assert_eq!(first.place.at, Position { line: 9, character: 11 });
-        assert_eq!(first.place.end, Position { line: 9, character: 25 });
+        assert_eq!(
+            first.place.path,
+            std::path::PathBuf::from("/p/src/request.rs")
+        );
+        assert_eq!(
+            first.place.at,
+            Position {
+                line: 9,
+                character: 11
+            }
+        );
+        assert_eq!(
+            first.place.end,
+            Position {
+                line: 9,
+                character: 25
+            }
+        );
         assert_eq!(found[1].container, None);
         assert_eq!(found[2].container, None, "an empty container is none");
     }
@@ -233,14 +251,20 @@ mod tests {
     fn the_request_and_the_settings_say_what_is_wanted() {
         assert_eq!(WORKSPACE_SYMBOL, "workspace/symbol");
         assert_eq!(symbol_params("req"), json!({"query": "req"}));
-        assert_eq!(server_options()["workspace"]["symbol"]["search"]["kind"], json!("all_symbols"));
+        assert_eq!(
+            server_options()["workspace"]["symbol"]["search"]["kind"],
+            json!("all_symbols")
+        );
     }
 
     #[test]
     fn the_server_is_started_with_the_settings_of_the_symbols_and_of_the_lenses() {
         let params = super::super::initialize_params(std::path::Path::new("/p"), 1);
         let options = &params["initializationOptions"];
-        assert_eq!(options["workspace"]["symbol"]["search"]["kind"], json!("all_symbols"));
+        assert_eq!(
+            options["workspace"]["symbol"]["search"]["kind"],
+            json!("all_symbols")
+        );
         assert_eq!(options["lens"]["enable"], json!(true));
     }
 }

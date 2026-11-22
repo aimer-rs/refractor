@@ -46,7 +46,10 @@ struct Stamp {
 impl Stamp {
     fn of(path: &Path) -> Option<Self> {
         let metadata = std::fs::metadata(path).ok()?;
-        Some(Self { modified: metadata.modified().ok(), len: metadata.len() })
+        Some(Self {
+            modified: metadata.modified().ok(),
+            len: metadata.len(),
+        })
     }
 }
 
@@ -54,6 +57,8 @@ impl Stamp {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Language {
     Rust,
+    /// TOML, as `Cargo.toml` is written.
+    Toml,
     /// Markdown, which is shown rendered wherever the caret is not.
     Markdown,
     PlainText,
@@ -67,6 +72,7 @@ impl Language {
             .and_then(|extension| extension.to_str())
         {
             Some(extension) if extension.eq_ignore_ascii_case("rs") => Self::Rust,
+            Some(extension) if extension.eq_ignore_ascii_case("toml") => Self::Toml,
             Some(extension)
                 if extension.eq_ignore_ascii_case("md")
                     || extension.eq_ignore_ascii_case("markdown") =>
@@ -77,10 +83,16 @@ impl Language {
         }
     }
 
+    /// Whether the language has items to complete a word with.
+    pub fn has_completions(self) -> bool {
+        matches!(self, Self::Rust | Self::Toml)
+    }
+
     /// What begins a line comment in the language, where it has a line comment that the commenting shortcut can make.
     pub fn line_comment(self) -> Option<&'static str> {
         match self {
             Self::Rust => Some(crate::line_comment::LineComment::RUST),
+            Self::Toml => Some(crate::line_comment::LineComment::TOML),
             Self::Markdown | Self::PlainText => None,
         }
     }
@@ -89,9 +101,20 @@ impl Language {
     pub fn label(self) -> &'static str {
         match self {
             Self::Rust => "Rust",
+            Self::Toml => "TOML",
             Self::Markdown => "Markdown",
             Self::PlainText => "Plain Text",
         }
+    }
+}
+
+impl Document {
+    /// The name of the manifest of a crate, which the Cargo schema is for.
+    pub const CARGO_MANIFEST: &'static str = "Cargo.toml";
+
+    /// Whether this is the `Cargo.toml` of a crate: other TOML files are not the Cargo schema's to check.
+    pub fn is_cargo_manifest(&self) -> bool {
+        self.language == Language::Toml && self.name == Self::CARGO_MANIFEST
     }
 }
 
@@ -206,6 +229,7 @@ impl Document {
         };
         let syntax = match language {
             Language::Rust => Some(SyntaxHighlighter::rust(SyntaxPalette::dark())),
+            Language::Toml => Some(SyntaxHighlighter::toml(SyntaxPalette::dark())),
             Language::Markdown | Language::PlainText => None,
         };
         // Every document starts in the dark theme; what shows it says the theme it is shown in with
@@ -279,8 +303,10 @@ impl Document {
                     }
                 };
                 self.reloading.set(true);
-                self.controller.replace_range(old.clone(), &text[new.clone()]);
-                self.controller.select_bytes(moved(anchor), moved(focus));
+                self.controller
+                    .replace_range(old.clone(), &text[new.clone()]);
+                self.controller
+                    .select_bytes(moved(anchor), moved(focus));
                 self.reloading.set(false);
                 Reloaded::Replaced
             }
@@ -652,6 +678,22 @@ mod tests {
     }
 
     #[test]
+    fn a_toml_file_is_toml_and_has_a_toml_highlighter() {
+        assert_eq!(Language::of_path(Path::new("Cargo.toml")), Language::Toml);
+        assert_eq!(Language::of_path(Path::new("a/B.TOML")), Language::Toml);
+        assert_eq!(Language::Toml.label(), "TOML");
+        assert_eq!(Language::Toml.line_comment(), Some("#"));
+        let scratch = Scratch::new("toml-open");
+        let path = scratch.file("Cargo.toml", "[package]\nname = \"a\"\n");
+        let document = Document::open(1, &path, Rc::new(|| {})).expect("opens");
+        assert!(document.syntax.is_some());
+        assert!(document.is_cargo_manifest());
+        let other = scratch.file("rustfmt.toml", "a = 1\n");
+        let other = Document::open(2, &other, Rc::new(|| {})).expect("opens");
+        assert!(!other.is_cargo_manifest());
+    }
+
+    #[test]
     fn a_file_is_in_the_language_its_extension_says() {
         assert_eq!(Language::of_path(Path::new("src/main.rs")), Language::Rust);
         assert_eq!(Language::of_path(Path::new("MAIN.RS")), Language::Rust);
@@ -734,17 +776,28 @@ mod tests {
     }
 
     #[test]
-    fn the_file_is_the_same_until_something_else_changes_it_and_the_save_of_the_editor_is_not_a_change_by_something_else() {
+    fn the_file_is_the_same_until_something_else_changes_it_and_the_save_of_the_editor_is_not_a_change_by_something_else()
+     {
         let scratch = Scratch::new("disk");
         let path = scratch.file("a.rs", "one");
         let document = Document::open(1, &path, counter().1).unwrap();
         assert_eq!(document.disk(), Disk::Same);
-        document.controller.set_text("two, saved by the editor");
+        document
+            .controller
+            .set_text("two, saved by the editor");
         document.save().expect("saves");
-        assert_eq!(document.disk(), Disk::Same, "what the editor wrote is what it expects to find");
+        assert_eq!(
+            document.disk(),
+            Disk::Same,
+            "what the editor wrote is what it expects to find"
+        );
         changed_elsewhere(&path, "three, written by another program");
         assert_eq!(document.disk(), Disk::Changed);
-        assert_eq!(document.disk(), Disk::Changed, "and it stays changed until the editor has looked");
+        assert_eq!(
+            document.disk(),
+            Disk::Changed,
+            "and it stays changed until the editor has looked"
+        );
         std::fs::remove_file(&path).unwrap();
         assert_eq!(document.disk(), Disk::Gone);
     }
@@ -770,7 +823,8 @@ mod tests {
     }
 
     #[test]
-    fn reloading_puts_what_is_on_disk_in_the_text_keeps_the_caret_where_it_was_in_the_text_and_leaves_the_document_unchanged() {
+    fn reloading_puts_what_is_on_disk_in_the_text_keeps_the_caret_where_it_was_in_the_text_and_leaves_the_document_unchanged()
+     {
         let scratch = Scratch::new("reload");
         let path = scratch.file("a.rs", "alpha\nbeta\ngamma\n");
         let (count, notify) = counter();
@@ -779,27 +833,48 @@ mod tests {
         document.controller.select(14, 14);
         changed_elsewhere(&path, "alpha\nBETA, longer\ngamma\n");
         assert_eq!(document.reload().expect("reads"), Reloaded::Replaced);
-        assert_eq!(document.controller.value().text(), "alpha\nBETA, longer\ngamma\n");
+        assert_eq!(
+            document.controller.value().text(),
+            "alpha\nBETA, longer\ngamma\n"
+        );
         assert!(!document.is_dirty());
         assert_eq!(document.disk(), Disk::Same);
-        let caret = document.controller.value().selection().range().start;
-        assert_eq!(&document.controller.value().text()[caret..caret + 2], "ma", "still at the `m` of `gamma`, which moved with the text");
+        let caret = document
+            .controller
+            .value()
+            .selection()
+            .range()
+            .start;
+        assert_eq!(
+            &document.controller.value().text()[caret..caret + 2],
+            "ma",
+            "still at the `m` of `gamma`, which moved with the text"
+        );
         assert_eq!(count.get(), 0, "unchanged before and after: nothing to say");
     }
 
     #[test]
-    fn a_caret_in_what_was_replaced_goes_to_the_start_of_what_replaced_it_and_one_before_it_stays() {
+    fn a_caret_in_what_was_replaced_goes_to_the_start_of_what_replaced_it_and_one_before_it_stays()
+    {
         let scratch = Scratch::new("caret");
         let path = scratch.file("a.rs", "alpha beta gamma");
         let document = Document::open(1, &path, counter().1).unwrap();
         document.controller.select(8, 8);
         changed_elsewhere(&path, "alpha BETA!! gamma");
         document.reload().unwrap();
-        assert_eq!(document.controller.value().selection().range(), 6..6, "in `beta`, which was replaced");
+        assert_eq!(
+            document.controller.value().selection().range(),
+            6..6,
+            "in `beta`, which was replaced"
+        );
         document.controller.select(2, 2);
         changed_elsewhere(&path, "alpha BETA!! gamma, too");
         document.reload().unwrap();
-        assert_eq!(document.controller.value().selection().range(), 2..2, "before it");
+        assert_eq!(
+            document.controller.value().selection().range(),
+            2..2,
+            "before it"
+        );
     }
 
     #[test]
@@ -810,7 +885,11 @@ mod tests {
         changed_elsewhere(&path, "one");
         let before = document.controller.revision();
         assert_eq!(document.reload().unwrap(), Reloaded::Unchanged);
-        assert_eq!(document.controller.revision(), before, "the text was not touched");
+        assert_eq!(
+            document.controller.revision(),
+            before,
+            "the text was not touched"
+        );
         assert_eq!(document.disk(), Disk::Same);
     }
 
@@ -828,7 +907,10 @@ mod tests {
         assert!(!document.is_dirty());
         assert_eq!(document.controller.value().text(), "theirs");
         assert!(count.get() > told, "it became unchanged, which is said");
-        assert!(document.controller.undo(), "and a reload can be taken back, which is a text that is not the file's, and so changed");
+        assert!(
+            document.controller.undo(),
+            "and a reload can be taken back, which is a text that is not the file's, and so changed"
+        );
         assert!(document.is_dirty());
     }
 
@@ -846,7 +928,8 @@ mod tests {
     }
 
     #[test]
-    fn what_watches_for_edits_is_told_of_each_change_of_the_text_and_not_of_a_move_of_the_caret_or_of_a_save() {
+    fn what_watches_for_edits_is_told_of_each_change_of_the_text_and_not_of_a_move_of_the_caret_or_of_a_save()
+     {
         let scratch = Scratch::new("edits");
         let document = Document::open(1, &scratch.file("a.rs", "one"), counter().1).unwrap();
         let (edits, hook) = counter();
@@ -856,7 +939,11 @@ mod tests {
         document.controller.set_text("one two");
         assert_eq!(edits.get(), 1);
         document.controller.set_text("one two three");
-        assert_eq!(edits.get(), 2, "each, though the document was changed already");
+        assert_eq!(
+            edits.get(),
+            2,
+            "each, though the document was changed already"
+        );
         document.controller.select(1, 1);
         assert_eq!(edits.get(), 2);
         document.save().expect("saves");

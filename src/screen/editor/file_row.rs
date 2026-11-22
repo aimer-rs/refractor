@@ -9,10 +9,11 @@ use crate::workspace::{Workspace, notifier};
 use aimer::decoration::Decoration;
 use aimer::input::button::Button;
 use aimer::share::ShareRef;
-use aimer::style::{LayoutSpacing, TextOverflow, Theme};
+use aimer::style::TextOverflow::{Clip, Wrap};
+use aimer::style::{BorderRadius, LayoutSpacing, TextOverflow, Theme};
 use aimer::{
-    BoxAlignment, BuildContext, Color, Container, Dimension, Expanded, Icons, ProviderContext,
-    ProviderHandle, Row as Line, SizedBox, StatelessWidget, Text, Widget,
+    BoxAlignment, BuildContext, Color, Container, Dimension, Expanded, Icons, NumberExt,
+    ProviderContext, ProviderHandle, Row as Line, SizedBox, StatelessWidget, Text, Widget, list,
 };
 
 /// How far each level of the tree is indented, in logical pixels.
@@ -125,35 +126,30 @@ impl StatelessWidget for FileRow {
                         (None, true) => crate::components::dot::dot(6, theme.accent).notype(),
                         (None, false) => SizedBox::new().width(1).notype(),
                     };
-                SizedBox::new()
-                    .width(Dimension::Percent(100.0))
+                Container::new()
                     .height(HEIGHT)
-                    .box_child(
-                        Container::new()
-                            .width(Dimension::Percent(100.0))
-                            .padding(pad(0, 14, 0, 8 + INDENT * row.depth as u32))
-                            .decoration([background.notype()])
-                            .child(
-                                Line::new()
-                                    .vertical_alignment(BoxAlignment::Center)
-                                    .gaps(LayoutSpacing::all(6))
-                                    .children([
-                                        lead.boxed(),
-                                        kind.boxed(),
-                                        Expanded::new()
-                                            .child(
-                                                Text::new(row.name.clone()).text_style(
-                                                    fonts::ui()
-                                                        .font_size(13)
-                                                        .color(name_color)
-                                                        .text_overflow(TextOverflow::Ellipsis)
-                                                        .font_weight(aimer::FontWeight::Normal),
-                                                ),
-                                            )
-                                            .boxed(),
-                                        mark.boxed(),
-                                    ]),
-                            ),
+                    .width(Dimension::Percent(100.0))
+                    .margin(pad(0, 8, 0, 8))
+                    .padding(pad(0, 14, 0, 8 + INDENT * row.depth as u32))
+                    .decoration([BorderRadius::all(4.px()).notype(), background.notype()])
+                    .child(
+                        Line::new()
+                            .vertical_alignment(BoxAlignment::Center)
+                            .gaps(LayoutSpacing::all(6))
+                            .children(list![
+                                lead,
+                                kind,
+                                Expanded::new().child(
+                                    Text::new(row.name.clone()).text_style(
+                                        fonts::ui()
+                                            .font_size(13)
+                                            .color(name_color)
+                                            .text_overflow(TextOverflow::Clip)
+                                            .font_weight(aimer::FontWeight::Normal),
+                                    ),
+                                ),
+                                mark,
+                            ]),
                     )
             })
     }

@@ -8,7 +8,8 @@ struct Scratch(PathBuf);
 
 impl Scratch {
     fn new(name: &str) -> Self {
-        let path = std::env::temp_dir().join(format!("refractor-filesync-{name}-{}", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("refractor-filesync-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&path);
         std::fs::create_dir_all(&path).expect("the temporary folder can be made");
         Self(path)
@@ -17,7 +18,10 @@ impl Scratch {
     fn open(&self, id: u64, name: &str, text: &str) -> (Rc<Document>, PathBuf) {
         let path = self.0.join(name);
         std::fs::write(&path, text).expect("the file is written");
-        (Document::open(id, &path, Rc::new(|| {})).expect("opens"), path)
+        (
+            Document::open(id, &path, Rc::new(|| {})).expect("opens"),
+            path,
+        )
     }
 }
 
@@ -51,15 +55,24 @@ fn a_file_that_something_else_changed_is_read_again_when_the_document_has_no_cha
 }
 
 #[test]
-fn a_file_that_something_else_changed_and_the_document_changed_too_is_not_read_and_the_conflict_is_told_once() {
+fn a_file_that_something_else_changed_and_the_document_changed_too_is_not_read_and_the_conflict_is_told_once()
+ {
     let scratch = Scratch::new("conflict");
     let (document, path) = scratch.open(1, "a.rs", "one");
     document.controller.set_text("mine");
     elsewhere(&path, "theirs, which is longer");
     assert_eq!(sync_document(&document), Synced::Conflict);
-    assert_eq!(document.controller.value().text(), "mine", "what the user wrote is not thrown away");
+    assert_eq!(
+        document.controller.value().text(),
+        "mine",
+        "what the user wrote is not thrown away"
+    );
     assert!(document.is_dirty());
-    assert_eq!(sync_document(&document), Synced::Same, "told once, and not every time it is looked at");
+    assert_eq!(
+        sync_document(&document),
+        Synced::Same,
+        "told once, and not every time it is looked at"
+    );
     // Another change of the file is another conflict.
     elsewhere(&path, "theirs, again and again");
     assert_eq!(sync_document(&document), Synced::Conflict);
@@ -71,7 +84,11 @@ fn a_file_that_is_gone_is_told_once_and_the_text_stays() {
     let (document, path) = scratch.open(1, "a.rs", "one");
     std::fs::remove_file(&path).unwrap();
     assert_eq!(sync_document(&document), Synced::Deleted);
-    assert_eq!(document.controller.value().text(), "one", "to be saved again, if it is wanted");
+    assert_eq!(
+        document.controller.value().text(),
+        "one",
+        "to be saved again, if it is wanted"
+    );
     assert_eq!(sync_document(&document), Synced::Same);
     // A document that has changes says the same, and keeps them.
     let (changed, other) = scratch.open(2, "b.rs", "one");
@@ -92,7 +109,10 @@ fn a_file_that_came_back_is_read_when_the_document_has_no_changes() {
     assert_eq!(sync_document(&document), Synced::Deleted);
     elsewhere(&path, "one, written again and longer");
     assert_eq!(sync_document(&document), Synced::Reloaded);
-    assert_eq!(document.controller.value().text(), "one, written again and longer");
+    assert_eq!(
+        document.controller.value().text(),
+        "one, written again and longer"
+    );
 }
 
 #[test]
@@ -115,7 +135,8 @@ fn a_change_made_by_the_save_of_the_editor_is_not_one() {
 }
 
 #[test]
-fn what_looks_at_the_files_looks_at_each_and_tells_what_was_found_of_those_that_were_not_the_same() {
+fn what_looks_at_the_files_looks_at_each_and_tells_what_was_found_of_those_that_were_not_the_same()
+{
     let scratch = Scratch::new("all");
     let (a, a_path) = scratch.open(1, "a.rs", "one");
     let (b, _) = scratch.open(2, "b.rs", "one");
@@ -124,8 +145,14 @@ fn what_looks_at_the_files_looks_at_each_and_tells_what_was_found_of_those_that_
     elsewhere(&a_path, "two!");
     elsewhere(&c_path, "three!!");
     let told: RefCell<Vec<(u64, Synced)>> = RefCell::default();
-    look_at(&[a, b, c], &|document, found| told.borrow_mut().push((document.id, found)));
-    assert_eq!(*told.borrow(), vec![(1, Synced::Reloaded), (3, Synced::Conflict)], "the one that was the same is not told");
+    look_at(&[a, b, c], &|document, found| {
+        told.borrow_mut().push((document.id, found))
+    });
+    assert_eq!(
+        *told.borrow(),
+        vec![(1, Synced::Reloaded), (3, Synced::Conflict)],
+        "the one that was the same is not told"
+    );
 }
 
 #[test]
@@ -134,7 +161,10 @@ fn the_loop_that_looks_ends_when_what_it_is_for_is_gone() {
     let looked = Rc::new(Cell::new(0));
     let counted = Rc::clone(&looked);
     // No runtime, no timers: it begins nothing, and is not begun twice.
-    sync.start(Rc::new(Vec::new), Rc::new(move |_, _| counted.set(counted.get() + 1)));
+    sync.start(
+        Rc::new(Vec::new),
+        Rc::new(move |_, _| counted.set(counted.get() + 1)),
+    );
     sync.start(Rc::new(Vec::new), Rc::new(|_, _| {}));
     assert_eq!(looked.get(), 0);
 }

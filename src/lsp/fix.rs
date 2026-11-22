@@ -32,7 +32,11 @@ impl CodeFix {
             return false;
         }
         let selection = controller.value().selection().range();
-        let edits: Vec<(Range<usize>, &str)> = self.edits.iter().map(|(range, text)| (range.clone(), text.as_str())).collect();
+        let edits: Vec<(Range<usize>, &str)> = self
+            .edits
+            .iter()
+            .map(|(range, text)| (range.clone(), text.as_str()))
+            .collect();
         if !controller.replace_ranges(&edits, 0) {
             return false;
         }
@@ -44,14 +48,20 @@ impl CodeFix {
     /// Where the byte `at` of the text the fix is of is in the text it makes: moved by each edit that ends at or before it, and at the
     /// start of what an edit replaced if it is in the middle of it.
     fn moved(&self, at: usize) -> usize {
-        let point = self.edits.iter().find(|(range, _)| range.start < at && at < range.end).map_or(at, |(range, _)| range.start);
+        let point = self
+            .edits
+            .iter()
+            .find(|(range, _)| range.start < at && at < range.end)
+            .map_or(at, |(range, _)| range.start);
         let shift: isize = self
             .edits
             .iter()
             .filter(|(range, _)| range.end <= point)
             .map(|(range, text)| text.len() as isize - (range.end - range.start) as isize)
             .sum();
-        point.checked_add_signed(shift).expect("a caret is not before the start of the text")
+        point
+            .checked_add_signed(shift)
+            .expect("a caret is not before the start of the text")
     }
 }
 
@@ -60,7 +70,12 @@ impl Lsp {
     /// only this file, in the order the server said them, when it has said: with none where it could not be asked or could not say. `done`
     /// is not called from inside this unless it is with none, and not at all if the request is [cancelled](Self::cancel). The number that
     /// is returned is the request's.
-    pub fn code_actions(&self, path: &Path, range: Range<usize>, done: impl FnOnce(Option<Vec<CodeFix>>) + 'static) -> Option<i64> {
+    pub fn code_actions(
+        &self,
+        path: &Path,
+        range: Range<usize>,
+        done: impl FnOnce(Option<Vec<CodeFix>>) + 'static,
+    ) -> Option<i64> {
         let Some(text) = self.snapshot(path) else {
             done(None);
             return None;
