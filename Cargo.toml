@@ -6,12 +6,14 @@ description = "A code editor built with the Aimer framework"
 
 [lib]
 path = "src/main.rs"
-crate-type = ["cdylib", "staticlib", "rlib"]
+crate-type = ["cdylib", "staticlib"]
 
 [dependencies]
-aimer = {git="https://github.com/Cottons29/aimer.git", branch = "main", features = ["provider", "svg", "icons", "native", "markdown", "lottie", "file-picker"] }
+aimer = {git="https://github.com/Cottons29/aimer.git", branch = "main", features = ["provider", "svg", "icons", "native", "markdown", "lottie", "file-picker", "device"] }
+# Uncomment this to do local development
+# aimer = { path = "../aimer", features = ["provider", "svg", "icons", "native", "markdown", "lottie", "file-picker", "device"] }
 
-# aimer = { path = "../aimer", features = ["provider", "svg", "icons", "native", "markdown", "lottie", "file-picker"] }
+
 arborium = { version = "2.18.0", default-features = false, features = ["lang-rust", "lang-toml", "lang-markdown", "lang-json","lang-html"] }
 lsp-types = "=0.97.0"
 serde = { version = "1.0.229", features = ["derive"] }
@@ -21,6 +23,7 @@ ignore = "=0.4.34"
 grep-searcher = "=0.1.17"
 grep-regex = "=0.1.14"
 grep-matcher = "=0.1.9"
+git2 = { version = "=0.20.2", default-features = false, features = ["vendored-libgit2", "zlib-ng-compat"] }
 
 [profile.dev.package.unicode-segmentation]
 opt-level = 3

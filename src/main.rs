@@ -1,41 +1,13 @@
-mod app_shell;
-mod auto_indent;
-mod auto_pair;
-mod auto_save;
-mod cargo;
-mod completion;
-mod components;
-mod doc_comments;
-mod document;
-mod editor_menu;
-mod file_icons;
-mod file_sync;
-mod fonts;
-mod git;
-mod hints;
-mod hover;
-mod indent_guides;
-mod line_comment;
-mod lsp;
-mod markdown;
-mod problem_lines;
-mod rename;
-mod screen;
-mod search;
-mod semantic;
-mod session;
-mod settings;
-mod syntax;
-mod theme;
-mod tree;
-mod usages;
-mod workspace;
+mod model;
+mod services;
+mod ui;
 
-use crate::app_shell::AppShell;
-use crate::settings::Settings;
-use crate::workspace::Workspace;
+use crate::model::workspace::Workspace;
+use crate::services::settings::Settings;
+use crate::ui::app_shell::AppShell;
 use aimer::native::macos_windowing::MacosWindowing;
 use aimer::quiver::window_attr::WindowAttr;
+use aimer::screen::{DisplayFeature, MediaQuery};
 use aimer::*;
 
 // this is the entry point of the app
@@ -44,8 +16,8 @@ fn main() {
     let workspace = Workspace::initial();
     let workspace_path = workspace.root.clone();
 
-    fonts::register();
-    app_shell::menu_commands::install();
+    ui::fonts::register();
+    ui::app_shell::menu_commands::install();
     AimerApp::new()
         .window(
             WindowAttr::new()

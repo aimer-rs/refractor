@@ -1,0 +1,10 @@
+pub(crate) mod auto_save;
+pub(crate) mod cargo;
+pub(crate) mod cfg_target;
+pub(crate) mod file_sync;
+pub(crate) mod git;
+pub(crate) mod lsp;
+pub(crate) mod search;
+pub(crate) mod session;
+pub(crate) mod settings;
+pub(crate) mod tree_ops;

@@ -29,3 +29,4 @@ builds/dist
 # add another ignore here -_-
 agents/
 target/
+.DS_Store

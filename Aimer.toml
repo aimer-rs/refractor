@@ -25,3 +25,7 @@ ui_font = "assets/Inter/Inter-VariableFont_opsz,wght.ttf"
 ui_font_italic = "assets/Inter/Inter-Italic-VariableFont_opsz,wght.ttf"
 mono_font = "assets/JetBrainsMono-2.304/fonts/variable/JetBrainsMono[wght].ttf"
 mono_font_italic = "assets/JetBrainsMono-2.304/fonts/variable/JetBrainsMono-Italic[wght].ttf"
+
+
+[icons]
+source = "assets/icon.png"

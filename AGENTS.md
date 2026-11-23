@@ -53,6 +53,11 @@ Follow `.codestyle/*` (it is the reference for how widgets are organized: one wi
 stateful widget patterns, helpers, and borrowing over cloning). Where it is silent, match the surrounding
 module.
 
+- The app's visual theme and primary accent color is pink (`theme.marker` in `CodeTheme`, along with
+  `theme.selected`, `theme.muted` and `theme.link`). Use `theme.marker` (and `theme.marker.darken(...)` or
+  `theme.marker.with_alpha(...)`) for primary buttons, active tabs/toggles, checkboxes, highlights and
+  interactive UI chrome. Reserve `theme.accent` (cyan) strictly for git-modified file names.
+
 ## Rust source layout
 
 - Keep every project-owned `.rs` file below about 1,000 physical lines, tests and documentation comments

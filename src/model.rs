@@ -1,0 +1,10 @@
+pub(crate) mod auto_indent;
+pub(crate) mod auto_pair;
+pub(crate) mod completion;
+pub(crate) mod document;
+pub(crate) mod go_to_line;
+pub(crate) mod line_comment;
+pub(crate) mod param_hint;
+pub(crate) mod syntax;
+pub(crate) mod tree;
+pub(crate) mod workspace;
