@@ -24,3 +24,9 @@ A code editor built with the  [Aimer](https://github.com/aimer-rs/aimer) framewo
 ## Who is using right now ?
 
 [Aimer](https://github.com/aimer-rs/aimer) developer teams is using it for build the Aimer UI framework.
+
+
+## Screenshots
+
+![Rust Codes](assets/rust_code_screeenshot.png)
+
